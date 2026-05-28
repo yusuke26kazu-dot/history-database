@@ -1,0 +1,260 @@
+import type { Event, Person, PersonEvent, TermCard } from "../models";
+
+export const people: Person[] = [
+  {
+    id: "franz-ferdinand",
+    name: "フランツ・フェルディナント",
+    birthYear: 1863,
+    deathYear: 1914,
+    affiliations: ["オーストリア＝ハンガリー帝国", "ハプスブルク家"],
+    summary: "オーストリア＝ハンガリー帝国の皇位継承者。サラエボ事件の被害者。",
+  },
+  {
+    id: "gavrilo-princip",
+    name: "ガヴリロ・プリンツィプ",
+    birthYear: 1894,
+    deathYear: 1918,
+    affiliations: ["セルビア民族主義運動", "青年ボスニア"],
+    summary: "ボスニア出身のセルビア系民族主義者。サラエボ事件の実行者。",
+  },
+  {
+    id: "wilhelm-ii",
+    name: "ヴィルヘルム2世",
+    birthYear: 1859,
+    deathYear: 1941,
+    affiliations: ["ドイツ帝国", "ホーエンツォレルン家"],
+    summary: "第一次世界大戦期のドイツ皇帝。対外政策と戦時指導に関わった。",
+  },
+  {
+    id: "nicholas-ii",
+    name: "ニコライ2世",
+    birthYear: 1868,
+    deathYear: 1918,
+    affiliations: ["ロシア帝国", "ロマノフ家"],
+    summary: "ロシア帝国最後の皇帝。第一次世界大戦と革命の中で退位した。",
+  },
+  {
+    id: "woodrow-wilson",
+    name: "ウッドロウ・ウィルソン",
+    birthYear: 1856,
+    deathYear: 1924,
+    affiliations: ["アメリカ合衆国", "民主党"],
+    summary: "第一次世界大戦期のアメリカ大統領。十四か条の平和原則を提唱した。",
+  },
+  {
+    id: "georges-clemenceau",
+    name: "ジョルジュ・クレマンソー",
+    birthYear: 1841,
+    deathYear: 1929,
+    affiliations: ["フランス第三共和政"],
+    summary: "第一次世界大戦末期から講和会議期のフランス首相。",
+  },
+  {
+    id: "socrates",
+    name: "ソクラテス",
+    birthYear: -469,
+    deathYear: -398,
+    affiliations: ["アテナイ", "古代ギリシア"],
+    summary: "対話を通じて徳や知を問い続けた古代ギリシアの哲学者。",
+  },
+  {
+    id: "plato",
+    name: "プラトン",
+    birthYear: -427,
+    deathYear: -346,
+    affiliations: ["アテナイ", "古代ギリシア", "アカデメイア"],
+    summary: "ソクラテスの弟子。対話篇を通じて師の思想と独自の哲学を展開した。",
+  },
+  {
+    id: "aristophanes",
+    name: "アリストファネス",
+    birthYear: -445,
+    deathYear: -385,
+    affiliations: ["アテナイ", "古代ギリシア"],
+    summary: "古代アテナイの喜劇作家。『雲』でソクラテスを風刺的に描いた。",
+  },
+];
+
+export const events: Event[] = [
+  {
+    id: "sarajevo-assassination",
+    title: "サラエボ事件",
+    startDate: "1914-06-28",
+    category: "暗殺",
+    relatedCountries: ["オーストリア＝ハンガリー帝国", "セルビア"],
+    summary: "皇位継承者フランツ・フェルディナントがサラエボで暗殺された。",
+    detail:
+      "サラエボ事件は、オーストリア＝ハンガリー帝国の皇位継承者フランツ・フェルディナントがガヴリロ・プリンツィプに暗殺された出来事である。バルカン半島の緊張が、第一次世界大戦へ連鎖する契機になった。",
+    terms: ["サラエボ事件", "オーストリア＝ハンガリー帝国", "フランツ・フェルディナント", "ガヴリロ・プリンツィプ", "第一次世界大戦"],
+  },
+  {
+    id: "ww1",
+    title: "第一次世界大戦",
+    startDate: "1914-07-28",
+    endDate: "1918-11-11",
+    category: "戦争",
+    relatedCountries: [
+      "オーストリア＝ハンガリー帝国",
+      "ドイツ帝国",
+      "ロシア帝国",
+      "フランス",
+      "イギリス",
+      "アメリカ合衆国",
+    ],
+    summary: "同盟国と連合国を中心に展開した総力戦。",
+    detail:
+      "第一次世界大戦は、1914年から1918年にかけてヨーロッパを中心に展開した大規模な戦争である。サラエボ事件後の外交危機を経て、同盟関係が連鎖的に作動し、複数の帝国と国民国家が戦争に参加した。",
+    terms: ["第一次世界大戦", "サラエボ事件", "オーストリア＝ハンガリー帝国", "ドイツ帝国", "ロシア帝国"],
+  },
+  {
+    id: "austria-serbia-war",
+    title: "オーストリア＝ハンガリー帝国のセルビア宣戦",
+    startDate: "1914-07-28",
+    category: "外交",
+    relatedCountries: ["オーストリア＝ハンガリー帝国", "セルビア"],
+    summary: "サラエボ事件後の最後通牒を経て、両国間の戦争が始まった。",
+    detail:
+      "オーストリア＝ハンガリー帝国は、サラエボ事件後にセルビアへ厳しい最後通牒を突きつけた。交渉が決裂すると宣戦布告に至り、局地的危機は第一次世界大戦へ拡大した。",
+    terms: ["オーストリア＝ハンガリー帝国", "セルビア", "サラエボ事件", "第一次世界大戦"],
+  },
+  {
+    id: "russian-revolution",
+    title: "ロシア革命",
+    startDate: "1917-03-08",
+    endDate: "1917-11-07",
+    category: "革命",
+    relatedCountries: ["ロシア帝国"],
+    summary: "帝政が崩壊し、臨時政府とボリシェヴィキによる権力移行が起きた。",
+    detail:
+      "ロシア革命は、戦争の長期化、食糧不足、政治不信を背景に帝政を崩壊させた。ニコライ2世の退位後、臨時政府とソヴィエトの二重権力を経て、ボリシェヴィキが権力を掌握した。",
+    terms: ["ロシア革命", "ロシア帝国", "ニコライ2世"],
+  },
+  {
+    id: "us-enters-war",
+    title: "アメリカ合衆国の参戦",
+    startDate: "1917-04-06",
+    category: "戦争",
+    relatedCountries: ["アメリカ合衆国", "ドイツ帝国"],
+    summary: "無制限潜水艦作戦などを背景に、アメリカがドイツへ宣戦布告した。",
+    detail:
+      "アメリカ合衆国の参戦は、第一次世界大戦の戦局と講和構想に大きな影響を与えた。ウッドロウ・ウィルソンは、戦後秩序の構想として十四か条を提示した。",
+    terms: ["アメリカ合衆国", "ドイツ帝国", "第一次世界大戦", "ウッドロウ・ウィルソン"],
+  },
+  {
+    id: "armistice",
+    title: "休戦協定",
+    startDate: "1918-11-11",
+    category: "講和",
+    relatedCountries: ["ドイツ帝国", "フランス", "イギリス", "アメリカ合衆国"],
+    summary: "コンピエーニュの森で休戦協定が締結され、西部戦線の戦闘が終結した。",
+    detail:
+      "1918年11月11日の休戦協定により、西部戦線の戦闘は停止した。これにより第一次世界大戦の主要な戦闘は終結し、講和条約の交渉へ移った。",
+    terms: ["休戦協定", "第一次世界大戦", "ドイツ帝国", "フランス"],
+  },
+  {
+    id: "versailles",
+    title: "ヴェルサイユ条約",
+    startDate: "1919-06-28",
+    category: "講和",
+    relatedCountries: ["ドイツ帝国", "フランス", "イギリス", "アメリカ合衆国"],
+    summary: "第一次世界大戦後の講和条約として調印された。",
+    detail:
+      "ヴェルサイユ条約は、第一次世界大戦後の国際秩序を定めた講和条約である。ドイツへの賠償、領土変更、国際連盟構想などが含まれ、戦後政治に長い影響を残した。",
+    terms: ["ヴェルサイユ条約", "第一次世界大戦", "ドイツ帝国", "ウッドロウ・ウィルソン", "ジョルジュ・クレマンソー"],
+  },
+  {
+    id: "peloponnesian-war",
+    title: "ペロポネソス戦争",
+    startDate: "-0430-01-01",
+    endDate: "-0403-12-31",
+    category: "戦争",
+    relatedCountries: ["アテナイ", "スパルタ", "古代ギリシア"],
+    summary: "アテナイを中心とするデロス同盟と、スパルタを中心とするペロポネソス同盟の戦争。",
+    detail:
+      "ペロポネソス戦争は、古代ギリシア世界の覇権をめぐってアテナイとスパルタが衝突した長期戦である。ソクラテスが生きた時代背景であり、アテナイの政治・社会不安にも影響を与えた。",
+    terms: ["ペロポネソス戦争", "アテナイ", "スパルタ", "ソクラテス"],
+  },
+  {
+    id: "aristophanes-clouds",
+    title: "アリストファネス『雲』上演",
+    startDate: "-0422-01-01",
+    category: "思想",
+    relatedCountries: ["アテナイ", "古代ギリシア"],
+    summary: "喜劇『雲』でソクラテスが知識人の風刺対象として描かれた。",
+    detail:
+      "アリストファネスの『雲』は、ソクラテスを詭弁的な知識人として戯画化した喜劇である。史実のソクラテス像そのものではないが、当時のアテナイ社会が知識人をどう見ていたかを考える材料になる。",
+    terms: ["アリストファネス", "雲", "ソクラテス", "アテナイ"],
+  },
+  {
+    id: "trial-of-socrates",
+    title: "ソクラテス裁判",
+    startDate: "-0398-01-01",
+    category: "裁判",
+    relatedCountries: ["アテナイ", "古代ギリシア"],
+    summary: "ソクラテスが不敬神と青年への悪影響を問われ、死刑判決を受けた。",
+    detail:
+      "ソクラテス裁判では、ソクラテスが国家の認める神々を信じないこと、青年を堕落させることを理由に告発された。プラトンの『ソクラテスの弁明』は、この裁判を伝える代表的な資料である。",
+    terms: ["ソクラテス裁判", "ソクラテス", "プラトン", "アテナイ"],
+  },
+];
+
+export const personEvents: PersonEvent[] = [
+  { personId: "franz-ferdinand", eventId: "sarajevo-assassination", role: "被害者" },
+  { personId: "gavrilo-princip", eventId: "sarajevo-assassination", role: "実行者" },
+  { personId: "wilhelm-ii", eventId: "ww1", role: "ドイツ皇帝" },
+  { personId: "nicholas-ii", eventId: "ww1", role: "ロシア皇帝" },
+  { personId: "woodrow-wilson", eventId: "ww1", role: "アメリカ大統領" },
+  { personId: "franz-ferdinand", eventId: "austria-serbia-war", role: "開戦の契機" },
+  { personId: "nicholas-ii", eventId: "russian-revolution", role: "退位した皇帝" },
+  { personId: "woodrow-wilson", eventId: "us-enters-war", role: "参戦時の大統領" },
+  { personId: "woodrow-wilson", eventId: "versailles", role: "講和会議の主要指導者" },
+  { personId: "georges-clemenceau", eventId: "versailles", role: "講和会議の主要指導者" },
+  { personId: "socrates", eventId: "peloponnesian-war", role: "アテナイ市民・従軍経験者" },
+  { personId: "socrates", eventId: "aristophanes-clouds", role: "風刺対象" },
+  { personId: "aristophanes", eventId: "aristophanes-clouds", role: "作者" },
+  { personId: "socrates", eventId: "trial-of-socrates", role: "被告" },
+  { personId: "plato", eventId: "trial-of-socrates", role: "弟子・記録者" },
+];
+
+export const termCards: TermCard[] = [
+  {
+    id: "term-polis",
+    term: "ポリス",
+    category: "概念",
+    summary: "古代ギリシアにおける都市国家。政治共同体としての性格を持つ。",
+    detail:
+      "ポリスは、古代ギリシア世界における都市国家である。アテナイやスパルタは代表的なポリスであり、市民、軍事、宗教、政治制度が結びついた共同体として機能した。",
+    aliases: ["都市国家"],
+    relatedTerms: ["アテナイ", "スパルタ", "古代ギリシア"],
+  },
+  {
+    id: "term-delian-league",
+    term: "デロス同盟",
+    category: "概念",
+    summary: "ペルシア戦争後にアテナイを中心として形成された同盟。",
+    detail:
+      "デロス同盟は、ペルシアへの対抗を目的に形成されたギリシア諸ポリスの同盟である。次第にアテナイの影響力が強まり、スパルタとの緊張やペロポネソス戦争の背景の一つとなった。",
+    aliases: ["アテナイ海上同盟"],
+    relatedTerms: ["アテナイ", "ペロポネソス戦争", "ポリス"],
+  },
+  {
+    id: "term-total-war",
+    term: "総力戦",
+    category: "概念",
+    summary: "軍事だけでなく社会・経済・政治を動員する戦争の形態。",
+    detail:
+      "総力戦は、前線の軍隊だけでなく、産業、労働、食糧、宣伝、外交など国家社会全体を戦争に動員する戦争形態である。第一次世界大戦を理解する重要な観点である。",
+    aliases: ["total war"],
+    relatedTerms: ["第一次世界大戦", "ドイツ帝国", "ロシア帝国"],
+  },
+  {
+    id: "term-july-crisis",
+    term: "七月危機",
+    category: "用語",
+    summary: "サラエボ事件から第一次世界大戦開戦へ至る外交危機。",
+    detail:
+      "七月危機は、1914年6月末のサラエボ事件から、同年7月末のオーストリア＝ハンガリー帝国によるセルビア宣戦までの外交危機を指す。各国の同盟、動員、最後通牒が連鎖した。",
+    aliases: ["July Crisis"],
+    relatedTerms: ["サラエボ事件", "第一次世界大戦", "オーストリア＝ハンガリー帝国", "セルビア"],
+  },
+];
