@@ -152,6 +152,7 @@ function App() {
   const [timelineLaneMode, setTimelineLaneMode] = useState<TimelineLaneMode>("country");
   const [activeRecord, setActiveRecord] = useState<EditableRecord | null>(null);
   const [termPopup, setTermPopup] = useState<TermPopup | null>(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const timelineItems = useMemo(() => buildTimelineItems(people, events, personEvents), [people, events]);
   const countries = useMemo(() => extractCountries(people, events), [people, events]);
@@ -411,7 +412,7 @@ function App() {
   return (
     <main className="app-shell">
       <section className="workspace">
-        <aside className="control-panel" aria-label="検索条件">
+        <aside className={`control-panel ${mobileFiltersOpen ? "mobile-open" : ""}`} aria-label="検索条件">
           <div className="panel-title">
             <span className="brand-mark">Darius</span>
             <span className="brand-beta">β</span>
@@ -425,7 +426,10 @@ function App() {
                   aria-selected={viewMode === view.id}
                   className={viewMode === view.id ? "active" : ""}
                   key={view.id}
-                  onClick={() => setViewMode(view.id)}
+                  onClick={() => {
+                    setViewMode(view.id);
+                    setMobileFiltersOpen(false);
+                  }}
                   type="button"
                 >
                   <Icon size={16} />
@@ -499,6 +503,7 @@ function App() {
               setCategory("all");
               setCountry("all");
               setSearchQuery("");
+              setMobileFiltersOpen(false);
             }}
           >
             <RotateCcw size={16} />
@@ -518,6 +523,10 @@ function App() {
               <h1>第一次世界大戦</h1>
             </div>
             <div className="action-toolbar">
+              <button className="mobile-filter-toggle" type="button" onClick={() => setMobileFiltersOpen((value) => !value)}>
+                <Filter size={15} />
+                絞り込み
+              </button>
               <button type="button" onClick={addEvent}>
                 <Plus size={15} />
                 出来事
@@ -606,6 +615,14 @@ function App() {
             onUpdateTerm={updateTermCard}
             renderLinkedText={renderLinkedText}
             termPopup={termPopup}
+          />
+        )}
+        {mobileFiltersOpen && (
+          <button
+            aria-label="絞り込みを閉じる"
+            className="mobile-filter-backdrop"
+            type="button"
+            onClick={() => setMobileFiltersOpen(false)}
           />
         )}
       </section>
