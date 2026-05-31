@@ -1,4 +1,30 @@
-import type { Event, Person, PersonEvent, TermCard } from "../models";
+import type { Country, EraPeriod, Event, Person, PersonEvent, Region, TermCard } from "../models";
+
+export const countries: Country[] = [
+  { id: "austria-hungary", name: "オーストリア＝ハンガリー帝国", aliases: ["オーストリア"] },
+  { id: "serbia", name: "セルビア" },
+  { id: "germany", name: "ドイツ帝国", aliases: ["ドイツ"] },
+  { id: "russia", name: "ロシア帝国", aliases: ["ロシア"] },
+  { id: "france", name: "フランス" },
+  { id: "uk", name: "イギリス" },
+  { id: "usa", name: "アメリカ合衆国", aliases: ["アメリカ"] },
+  { id: "ancient-greece", name: "古代ギリシア" },
+];
+
+export const regions: Region[] = [
+  { id: "sarajevo", countryId: "austria-hungary", name: "サラエボ", latitude: 43.8563, longitude: 18.4131, note: "サラエボ事件の現場" },
+  { id: "vienna", countryId: "austria-hungary", name: "ウィーン", latitude: 48.2082, longitude: 16.3738 },
+  { id: "belgrade", countryId: "serbia", name: "ベオグラード", latitude: 44.7866, longitude: 20.4489 },
+  { id: "berlin", countryId: "germany", name: "ベルリン", latitude: 52.52, longitude: 13.405 },
+  { id: "petrograd", countryId: "russia", name: "ペトログラード", latitude: 59.9311, longitude: 30.3609, note: "ロシア革命期の中心地" },
+  { id: "paris", countryId: "france", name: "パリ", latitude: 48.8566, longitude: 2.3522 },
+  { id: "compiegne", countryId: "france", name: "コンピエーニュ", latitude: 49.4178, longitude: 2.8261, note: "休戦協定の締結地" },
+  { id: "versailles", countryId: "france", name: "ヴェルサイユ", latitude: 48.8049, longitude: 2.1204, note: "ヴェルサイユ条約の調印地" },
+  { id: "london", countryId: "uk", name: "ロンドン", latitude: 51.5072, longitude: -0.1276 },
+  { id: "washington-dc", countryId: "usa", name: "ワシントンD.C.", latitude: 38.9072, longitude: -77.0369 },
+  { id: "athens", countryId: "ancient-greece", name: "アテナイ", latitude: 37.9838, longitude: 23.7275 },
+  { id: "sparta", countryId: "ancient-greece", name: "スパルタ", latitude: 37.0745, longitude: 22.4301 },
+];
 
 export const people: Person[] = [
   {
@@ -6,6 +32,8 @@ export const people: Person[] = [
     name: "フランツ・フェルディナント",
     birthYear: 1863,
     deathYear: 1914,
+    countryIds: ["austria-hungary"],
+    regionIds: ["vienna", "sarajevo"],
     affiliations: ["オーストリア＝ハンガリー帝国", "ハプスブルク家"],
     summary: "オーストリア＝ハンガリー帝国の皇位継承者。サラエボ事件の被害者。",
   },
@@ -14,6 +42,8 @@ export const people: Person[] = [
     name: "ガヴリロ・プリンツィプ",
     birthYear: 1894,
     deathYear: 1918,
+    countryIds: ["serbia"],
+    regionIds: ["sarajevo"],
     affiliations: ["セルビア民族主義運動", "青年ボスニア"],
     summary: "ボスニア出身のセルビア系民族主義者。サラエボ事件の実行者。",
   },
@@ -22,6 +52,8 @@ export const people: Person[] = [
     name: "ヴィルヘルム2世",
     birthYear: 1859,
     deathYear: 1941,
+    countryIds: ["germany"],
+    regionIds: ["berlin"],
     affiliations: ["ドイツ帝国", "ホーエンツォレルン家"],
     summary: "第一次世界大戦期のドイツ皇帝。対外政策と戦時指導に関わった。",
   },
@@ -30,6 +62,8 @@ export const people: Person[] = [
     name: "ニコライ2世",
     birthYear: 1868,
     deathYear: 1918,
+    countryIds: ["russia"],
+    regionIds: ["petrograd"],
     affiliations: ["ロシア帝国", "ロマノフ家"],
     summary: "ロシア帝国最後の皇帝。第一次世界大戦と革命の中で退位した。",
   },
@@ -38,6 +72,8 @@ export const people: Person[] = [
     name: "ウッドロウ・ウィルソン",
     birthYear: 1856,
     deathYear: 1924,
+    countryIds: ["usa"],
+    regionIds: ["washington-dc"],
     affiliations: ["アメリカ合衆国", "民主党"],
     summary: "第一次世界大戦期のアメリカ大統領。十四か条の平和原則を提唱した。",
   },
@@ -46,6 +82,8 @@ export const people: Person[] = [
     name: "ジョルジュ・クレマンソー",
     birthYear: 1841,
     deathYear: 1929,
+    countryIds: ["france"],
+    regionIds: ["paris", "versailles"],
     affiliations: ["フランス第三共和政"],
     summary: "第一次世界大戦末期から講和会議期のフランス首相。",
   },
@@ -54,6 +92,8 @@ export const people: Person[] = [
     name: "ソクラテス",
     birthYear: -469,
     deathYear: -398,
+    countryIds: ["ancient-greece"],
+    regionIds: ["athens"],
     affiliations: ["アテナイ", "古代ギリシア"],
     summary: "対話を通じて徳や知を問い続けた古代ギリシアの哲学者。",
   },
@@ -62,6 +102,8 @@ export const people: Person[] = [
     name: "プラトン",
     birthYear: -427,
     deathYear: -346,
+    countryIds: ["ancient-greece"],
+    regionIds: ["athens"],
     affiliations: ["アテナイ", "古代ギリシア", "アカデメイア"],
     summary: "ソクラテスの弟子。対話篇を通じて師の思想と独自の哲学を展開した。",
   },
@@ -70,6 +112,8 @@ export const people: Person[] = [
     name: "アリストファネス",
     birthYear: -445,
     deathYear: -385,
+    countryIds: ["ancient-greece"],
+    regionIds: ["athens"],
     affiliations: ["アテナイ", "古代ギリシア"],
     summary: "古代アテナイの喜劇作家。『雲』でソクラテスを風刺的に描いた。",
   },
@@ -82,6 +126,8 @@ export const events: Event[] = [
     startDate: "1914-06-28",
     category: "暗殺",
     relatedCountries: ["オーストリア＝ハンガリー帝国", "セルビア"],
+    countryIds: ["austria-hungary", "serbia"],
+    regionIds: ["sarajevo"],
     summary: "皇位継承者フランツ・フェルディナントがサラエボで暗殺された。",
     detail:
       "サラエボ事件は、オーストリア＝ハンガリー帝国の皇位継承者フランツ・フェルディナントがガヴリロ・プリンツィプに暗殺された出来事である。バルカン半島の緊張が、第一次世界大戦へ連鎖する契機になった。",
@@ -101,6 +147,8 @@ export const events: Event[] = [
       "イギリス",
       "アメリカ合衆国",
     ],
+    countryIds: ["austria-hungary", "germany", "russia", "france", "uk", "usa"],
+    regionIds: ["vienna", "belgrade", "berlin", "petrograd", "paris", "london", "washington-dc"],
     summary: "同盟国と連合国を中心に展開した総力戦。",
     detail:
       "第一次世界大戦は、1914年から1918年にかけてヨーロッパを中心に展開した大規模な戦争である。サラエボ事件後の外交危機を経て、同盟関係が連鎖的に作動し、複数の帝国と国民国家が戦争に参加した。",
@@ -112,6 +160,8 @@ export const events: Event[] = [
     startDate: "1914-07-28",
     category: "外交",
     relatedCountries: ["オーストリア＝ハンガリー帝国", "セルビア"],
+    countryIds: ["austria-hungary", "serbia"],
+    regionIds: ["vienna", "belgrade"],
     summary: "サラエボ事件後の最後通牒を経て、両国間の戦争が始まった。",
     detail:
       "オーストリア＝ハンガリー帝国は、サラエボ事件後にセルビアへ厳しい最後通牒を突きつけた。交渉が決裂すると宣戦布告に至り、局地的危機は第一次世界大戦へ拡大した。",
@@ -124,6 +174,8 @@ export const events: Event[] = [
     endDate: "1917-11-07",
     category: "革命",
     relatedCountries: ["ロシア帝国"],
+    countryIds: ["russia"],
+    regionIds: ["petrograd"],
     summary: "帝政が崩壊し、臨時政府とボリシェヴィキによる権力移行が起きた。",
     detail:
       "ロシア革命は、戦争の長期化、食糧不足、政治不信を背景に帝政を崩壊させた。ニコライ2世の退位後、臨時政府とソヴィエトの二重権力を経て、ボリシェヴィキが権力を掌握した。",
@@ -135,6 +187,8 @@ export const events: Event[] = [
     startDate: "1917-04-06",
     category: "戦争",
     relatedCountries: ["アメリカ合衆国", "ドイツ帝国"],
+    countryIds: ["usa", "germany"],
+    regionIds: ["washington-dc", "berlin"],
     summary: "無制限潜水艦作戦などを背景に、アメリカがドイツへ宣戦布告した。",
     detail:
       "アメリカ合衆国の参戦は、第一次世界大戦の戦局と講和構想に大きな影響を与えた。ウッドロウ・ウィルソンは、戦後秩序の構想として十四か条を提示した。",
@@ -146,6 +200,8 @@ export const events: Event[] = [
     startDate: "1918-11-11",
     category: "講和",
     relatedCountries: ["ドイツ帝国", "フランス", "イギリス", "アメリカ合衆国"],
+    countryIds: ["germany", "france", "uk", "usa"],
+    regionIds: ["compiegne"],
     summary: "コンピエーニュの森で休戦協定が締結され、西部戦線の戦闘が終結した。",
     detail:
       "1918年11月11日の休戦協定により、西部戦線の戦闘は停止した。これにより第一次世界大戦の主要な戦闘は終結し、講和条約の交渉へ移った。",
@@ -157,6 +213,8 @@ export const events: Event[] = [
     startDate: "1919-06-28",
     category: "講和",
     relatedCountries: ["ドイツ帝国", "フランス", "イギリス", "アメリカ合衆国"],
+    countryIds: ["germany", "france", "uk", "usa"],
+    regionIds: ["versailles"],
     summary: "第一次世界大戦後の講和条約として調印された。",
     detail:
       "ヴェルサイユ条約は、第一次世界大戦後の国際秩序を定めた講和条約である。ドイツへの賠償、領土変更、国際連盟構想などが含まれ、戦後政治に長い影響を残した。",
@@ -169,6 +227,8 @@ export const events: Event[] = [
     endDate: "-0403-12-31",
     category: "戦争",
     relatedCountries: ["アテナイ", "スパルタ", "古代ギリシア"],
+    countryIds: ["ancient-greece"],
+    regionIds: ["athens", "sparta"],
     summary: "アテナイを中心とするデロス同盟と、スパルタを中心とするペロポネソス同盟の戦争。",
     detail:
       "ペロポネソス戦争は、古代ギリシア世界の覇権をめぐってアテナイとスパルタが衝突した長期戦である。ソクラテスが生きた時代背景であり、アテナイの政治・社会不安にも影響を与えた。",
@@ -180,6 +240,8 @@ export const events: Event[] = [
     startDate: "-0422-01-01",
     category: "思想",
     relatedCountries: ["アテナイ", "古代ギリシア"],
+    countryIds: ["ancient-greece"],
+    regionIds: ["athens"],
     summary: "喜劇『雲』でソクラテスが知識人の風刺対象として描かれた。",
     detail:
       "アリストファネスの『雲』は、ソクラテスを詭弁的な知識人として戯画化した喜劇である。史実のソクラテス像そのものではないが、当時のアテナイ社会が知識人をどう見ていたかを考える材料になる。",
@@ -191,6 +253,8 @@ export const events: Event[] = [
     startDate: "-0398-01-01",
     category: "裁判",
     relatedCountries: ["アテナイ", "古代ギリシア"],
+    countryIds: ["ancient-greece"],
+    regionIds: ["athens"],
     summary: "ソクラテスが不敬神と青年への悪影響を問われ、死刑判決を受けた。",
     detail:
       "ソクラテス裁判では、ソクラテスが国家の認める神々を信じないこと、青年を堕落させることを理由に告発された。プラトンの『ソクラテスの弁明』は、この裁判を伝える代表的な資料である。",
@@ -257,4 +321,32 @@ export const termCards: TermCard[] = [
     aliases: ["July Crisis"],
     relatedTerms: ["サラエボ事件", "第一次世界大戦", "オーストリア＝ハンガリー帝国", "セルビア"],
   },
+];
+
+export const eraPeriods: EraPeriod[] = [
+  { id: "jp-yayoi", group: "日本", name: "弥生", startYear: -300, endYear: 250, color: "#e8f4ff" },
+  { id: "jp-kofun", group: "日本", name: "古墳", startYear: 250, endYear: 592, color: "#eaf7ef" },
+  { id: "jp-asuka", group: "日本", name: "飛鳥", startYear: 592, endYear: 710, color: "#fff4d8" },
+  { id: "jp-nara", group: "日本", name: "奈良", startYear: 710, endYear: 794, color: "#ffece5" },
+  { id: "jp-heian", group: "日本", name: "平安", startYear: 794, endYear: 1185, color: "#f4ebff" },
+  { id: "jp-kamakura", group: "日本", name: "鎌倉", startYear: 1185, endYear: 1333, color: "#e6f7f5" },
+  { id: "jp-muromachi", group: "日本", name: "室町", startYear: 1336, endYear: 1573, color: "#eef1ff" },
+  { id: "jp-azuchi-momoyama", group: "日本", name: "安土桃山", startYear: 1573, endYear: 1603, color: "#fff0f0" },
+  { id: "jp-edo", group: "日本", name: "江戸", startYear: 1603, endYear: 1868, color: "#edf8e8" },
+  { id: "jp-meiji", group: "日本", name: "明治", startYear: 1868, endYear: 1912, color: "#eaf4ff" },
+  { id: "jp-taisho", group: "日本", name: "大正", startYear: 1912, endYear: 1926, color: "#fff4dc" },
+
+  { id: "cn-spring-autumn", group: "中国", name: "春秋", startYear: -770, endYear: -476, color: "#f1f7e9" },
+  { id: "cn-warring-states", group: "中国", name: "戦国", startYear: -475, endYear: -221, color: "#ffece2" },
+  { id: "cn-qin", group: "中国", name: "秦", startYear: -221, endYear: -206, color: "#f5eaff" },
+  { id: "cn-han", group: "中国", name: "漢", startYear: -206, endYear: 220, color: "#eaf4ff" },
+  { id: "cn-three-kingdoms", group: "中国", name: "三国", startYear: 220, endYear: 280, color: "#fff3d6" },
+  { id: "cn-jin", group: "中国", name: "晋", startYear: 265, endYear: 420, color: "#eaf7ef" },
+  { id: "cn-sui", group: "中国", name: "隋", startYear: 581, endYear: 618, color: "#f0f0ff" },
+  { id: "cn-tang", group: "中国", name: "唐", startYear: 618, endYear: 907, color: "#fff0ea" },
+  { id: "cn-song", group: "中国", name: "宋", startYear: 960, endYear: 1279, color: "#e9f7ff" },
+  { id: "cn-yuan", group: "中国", name: "元", startYear: 1271, endYear: 1368, color: "#edf8e8" },
+  { id: "cn-ming", group: "中国", name: "明", startYear: 1368, endYear: 1644, color: "#fff5d9" },
+  { id: "cn-qing", group: "中国", name: "清", startYear: 1644, endYear: 1912, color: "#eaf0ff" },
+  { id: "cn-republic", group: "中国", name: "中華民国", startYear: 1912, endYear: 1949, color: "#f7edff" },
 ];

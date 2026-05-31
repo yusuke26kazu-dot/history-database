@@ -45,7 +45,9 @@ export function filterTimelineItems(items: TimelineItem[], filter: TimelineFilte
     const matchesCountry =
       !filter.country ||
       filter.country === "all" ||
+      item.countryIds?.includes(filter.country) ||
       item.relatedCountries.includes(filter.country) ||
+      item.people.some((person) => person.countryIds?.includes(filter.country as string)) ||
       item.people.some((person) => person.affiliations.includes(filter.country as string));
 
     return matchesCategory && matchesCountry;
@@ -55,7 +57,9 @@ export function filterTimelineItems(items: TimelineItem[], filter: TimelineFilte
 export function extractCountries(people: Person[], events: Event[]) {
   return Array.from(
     new Set([
+      ...events.flatMap((event) => event.countryIds ?? []),
       ...events.flatMap((event) => event.relatedCountries),
+      ...people.flatMap((person) => person.countryIds ?? []),
       ...people.flatMap((person) => person.affiliations),
     ]),
   ).sort((a, b) => a.localeCompare(b, "ja"));

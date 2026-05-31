@@ -1,10 +1,12 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   BookOpen,
+  CalendarDays,
   Edit3,
   Filter,
   Library,
   ListTree,
+  MapPin,
   Plus,
   Rows3,
   RotateCcw,
@@ -13,11 +15,19 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { events as seedEvents, people as seedPeople, personEvents, termCards as seedTermCards } from "./data/ww1";
-import type { Category, EditableRecord, Event, Person, TermCard, TimelineItem } from "./models";
-import { buildTimelineItems, extractCountries, filterTimelineItems, getHistoricalYear } from "./query";
+import {
+  eraPeriods as seedEraPeriods,
+  countries as seedCountries,
+  events as seedEvents,
+  people as seedPeople,
+  personEvents,
+  regions as seedRegions,
+  termCards as seedTermCards,
+} from "./data/ww1";
+import type { Category, Country, EditableRecord, EraPeriod, Event, Person, Region, TermCard, TimelineItem } from "./models";
+import { buildTimelineItems, filterTimelineItems, getHistoricalYear } from "./query";
 
-type ViewMode = "timeline" | "category" | "people" | "cards";
+type ViewMode = "timeline" | "category" | "people" | "cards" | "map";
 type TimelineLaneMode = "country" | "plain";
 type TermPopup = { term: string; definition: string; target?: EditableRecord };
 type KnowledgeCard = {
@@ -28,6 +38,10 @@ type KnowledgeCard = {
   summary: string;
   meta: string;
   searchText: string;
+};
+type EventMapPin = {
+  item: TimelineItem;
+  region: Region;
 };
 type EventPlacement = {
   item: TimelineItem;
@@ -46,9 +60,18 @@ const viewModes: Array<{ id: ViewMode; label: string; icon: typeof Rows3 }> = [
   { id: "category", label: "カテゴリ", icon: ListTree },
   { id: "people", label: "人物", icon: UserRound },
   { id: "cards", label: "全カード", icon: Library },
+  { id: "map", label: "地図", icon: MapPin },
 ];
 
 const countryFlags: Record<string, string> = {
+  "austria-hungary": "🇦🇹🇭🇺",
+  serbia: "🇷🇸",
+  germany: "🇩🇪",
+  russia: "🇷🇺",
+  france: "🇫🇷",
+  uk: "🇬🇧",
+  usa: "🇺🇸",
+  "ancient-greece": "🏺",
   "オーストリア＝ハンガリー帝国": "🇦🇹🇭🇺",
   セルビア: "🇷🇸",
   ドイツ帝国: "🇩🇪",
@@ -77,6 +100,31 @@ const glossary: Record<string, string> = {
   ソクラテス裁判: "紀元前399年、ソクラテスが告発され死刑判決を受けた裁判。",
 };
 
+declare global {
+  interface Window {
+    google?: any;
+    initDariusMap?: () => void;
+    dariusGoogleMapsLoading?: Promise<void>;
+  }
+}
+
+function loadGoogleMaps(apiKey: string) {
+  if (window.google?.maps) return Promise.resolve();
+  if (window.dariusGoogleMapsLoading) return window.dariusGoogleMapsLoading;
+
+  window.dariusGoogleMapsLoading = new Promise<void>((resolve, reject) => {
+    window.initDariusMap = () => resolve();
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&callback=initDariusMap`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => reject(new Error("Google Maps could not be loaded."));
+    document.head.appendChild(script);
+  });
+
+  return window.dariusGoogleMapsLoading;
+}
+
 const formatDate = new Intl.DateTimeFormat("ja-JP", {
   year: "numeric",
   month: "2-digit",
@@ -97,6 +145,22 @@ function toYear(value: string) {
 
 function toDisplayYear(year: number) {
   return year < 1 ? `前${Math.abs(year) + 1}` : String(year);
+}
+
+function getPersonBirthDate(person: Person) {
+  return person.birthDate ?? `${person.birthYear}-01-01`;
+}
+
+function getPersonDeathDate(person: Person) {
+  return person.deathDate ?? `${person.deathYear}-12-31`;
+}
+
+function toPersonDateLabel(date: string | undefined, year: number) {
+  return date ? toLabelDate(date) : toDisplayYear(year);
+}
+
+function toPersonLifeLabel(person: Person) {
+  return `${toPersonDateLabel(person.birthDate, person.birthYear)}-${toPersonDateLabel(person.deathDate, person.deathYear)}`;
 }
 
 function getYearTickStep(zoom: number, yearSpan: number) {
@@ -122,8 +186,28 @@ function splitListValues(value: string) {
     .filter(Boolean);
 }
 
+function getPreviewImageLayout(imageUrls?: string[]) {
+  return (imageUrls ?? []).length > 0 ? "has-image" : "no-image";
+}
+
 function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function getCountryName(countries: Country[], id: string) {
+  return countries.find((country) => country.id === id)?.name ?? id;
+}
+
+function getRegionName(regions: Region[], id: string) {
+  return regions.find((region) => region.id === id)?.name ?? id;
+}
+
+function getRecordCountryIds(record: Event | Person) {
+  return record.countryIds ?? [];
+}
+
+function getRecordRegionIds(record: Event | Person) {
+  return record.regionIds ?? [];
 }
 
 function matchesSearch(value: string, query: string) {
@@ -138,6 +222,8 @@ function App() {
   const [events, setEvents] = useState<Event[]>(seedEvents);
   const [people, setPeople] = useState<Person[]>(seedPeople);
   const [termCards, setTermCards] = useState<TermCard[]>(seedTermCards);
+  const [countries, setCountries] = useState<Country[]>(seedCountries);
+  const [regions, setRegions] = useState<Region[]>(seedRegions);
   const [viewMode, setViewMode] = useState<ViewMode>("timeline");
   const [category, setCategory] = useState<Category | "all">("all");
   const [country, setCountry] = useState<string | "all">("all");
@@ -146,16 +232,21 @@ function App() {
   const [customGenres, setCustomGenres] = useState<string[]>([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newGenreName, setNewGenreName] = useState("");
+  const [newCountryName, setNewCountryName] = useState("");
+  const [newRegionName, setNewRegionName] = useState("");
+  const [newRegionCountryId, setNewRegionCountryId] = useState(seedCountries[0]?.id ?? "");
+  const [newRegionLatitude, setNewRegionLatitude] = useState("");
+  const [newRegionLongitude, setNewRegionLongitude] = useState("");
   const [detailEditMode, setDetailEditMode] = useState(false);
   const [timelineZoom, setTimelineZoom] = useState(1);
   const [timelineHeightZoom, setTimelineHeightZoom] = useState(1.35);
-  const [timelineLaneMode, setTimelineLaneMode] = useState<TimelineLaneMode>("country");
+  const [timelineLaneMode, setTimelineLaneMode] = useState<TimelineLaneMode>("plain");
+  const [showEraPeriods, setShowEraPeriods] = useState(true);
   const [activeRecord, setActiveRecord] = useState<EditableRecord | null>(null);
   const [termPopup, setTermPopup] = useState<TermPopup | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const timelineItems = useMemo(() => buildTimelineItems(people, events, personEvents), [people, events]);
-  const countries = useMemo(() => extractCountries(people, events), [people, events]);
   const categories = useMemo(
     () => uniqueValues([...baseCategories, ...customCategories, ...events.map((event) => event.category)]),
     [customCategories, events],
@@ -187,7 +278,8 @@ function App() {
           item.category,
           item.summary,
           item.detail,
-          item.relatedCountries.join(" "),
+          getRecordCountryIds(item).map((id) => getCountryName(countries, id)).join(" "),
+          getRecordRegionIds(item).map((id) => getRegionName(regions, id)).join(" "),
           (item.genres ?? []).join(" "),
           (item.references ?? []).join(" "),
           item.people.map((person) => person.name).join(" "),
@@ -202,16 +294,24 @@ function App() {
     const linkedIds = new Set(searchedItems.flatMap((item) => item.people.map((person) => person.id)));
     return people.filter((person) => {
       const matchesLinkedEvent = linkedIds.has(person.id);
-      const matchesCountry = country === "all" || person.affiliations.includes(country);
+      const matchesCountry = country === "all" || getRecordCountryIds(person).includes(country);
       const matchesText =
         !searchQuery.trim() ||
         matchesSearch(
-          [person.name, person.summary, person.affiliations.join(" "), (person.genres ?? []).join(" "), (person.references ?? []).join(" ")].join(" "),
+          [
+            person.name,
+            person.summary,
+            getRecordCountryIds(person).map((id) => getCountryName(countries, id)).join(" "),
+            getRecordRegionIds(person).map((id) => getRegionName(regions, id)).join(" "),
+            person.affiliations.join(" "),
+            (person.genres ?? []).join(" "),
+            (person.references ?? []).join(" "),
+          ].join(" "),
           searchQuery,
         );
       return (matchesLinkedEvent || matchesCountry) && matchesText;
     });
-  }, [country, searchedItems, people, searchQuery]);
+  }, [country, searchedItems, people, searchQuery, countries, regions]);
 
   const termTargets = useMemo(() => {
     const targets = new Map<string, EditableRecord>();
@@ -237,7 +337,8 @@ function App() {
         event.category,
         event.summary,
         event.detail,
-        event.relatedCountries.join(" "),
+        getRecordCountryIds(event).map((id) => getCountryName(countries, id)).join(" "),
+        getRecordRegionIds(event).map((id) => getRegionName(regions, id)).join(" "),
         (event.genres ?? []).join(" "),
         (event.references ?? []).join(" "),
         event.terms.join(" "),
@@ -250,8 +351,16 @@ function App() {
       title: person.name,
       label: "人物",
       summary: person.summary,
-      meta: `${toDisplayYear(person.birthYear)}-${toDisplayYear(person.deathYear)}`,
-      searchText: [person.name, person.summary, person.affiliations.join(" "), (person.genres ?? []).join(" "), (person.references ?? []).join(" ")].join(" "),
+      meta: toPersonLifeLabel(person),
+      searchText: [
+        person.name,
+        person.summary,
+        getRecordCountryIds(person).map((id) => getCountryName(countries, id)).join(" "),
+        getRecordRegionIds(person).map((id) => getRegionName(regions, id)).join(" "),
+        person.affiliations.join(" "),
+        (person.genres ?? []).join(" "),
+        (person.references ?? []).join(" "),
+      ].join(" "),
     }));
     const termKnowledgeCards = termCards.map((term) => ({
       id: term.id,
@@ -272,7 +381,7 @@ function App() {
       ].join(" "),
     }));
     return [...eventCards, ...personCards, ...termKnowledgeCards];
-  }, [timelineItems, people, termCards]);
+  }, [timelineItems, people, termCards, countries, regions]);
 
   const searchedCards = useMemo(() => {
     if (!searchQuery.trim()) return allCards;
@@ -312,6 +421,8 @@ function App() {
       startDate: "1914-01-01",
       category: "政治",
       relatedCountries: [],
+      countryIds: [],
+      regionIds: [],
       summary: "概要を入力してください。",
       detail: "詳細を入力してください。",
       terms: [],
@@ -331,6 +442,8 @@ function App() {
       name: "新しい人物",
       birthYear: 1900,
       deathYear: 1970,
+      countryIds: [],
+      regionIds: [],
       affiliations: [],
       summary: "人物の概要を入力してください。",
       genres: [],
@@ -389,6 +502,35 @@ function App() {
       setCustomGenres((current) => uniqueValues([...current, next]));
     }
     setNewGenreName("");
+  }
+
+  function addCountry() {
+    const name = newCountryName.trim();
+    if (!name) return;
+    const id = makeId("country");
+    setCountries((current) => [...current, { id, name }]);
+    setNewCountryName("");
+    setNewRegionCountryId(id);
+  }
+
+  function addRegion() {
+    const name = newRegionName.trim();
+    const latitude = Number(newRegionLatitude);
+    const longitude = Number(newRegionLongitude);
+    if (!name || !newRegionCountryId || Number.isNaN(latitude) || Number.isNaN(longitude)) return;
+    setRegions((current) => [
+      ...current,
+      {
+        id: makeId("region"),
+        countryId: newRegionCountryId,
+        name,
+        latitude,
+        longitude,
+      },
+    ]);
+    setNewRegionName("");
+    setNewRegionLatitude("");
+    setNewRegionLongitude("");
   }
 
   function renderLinkedText(text: string, terms: string[]) {
@@ -485,16 +627,46 @@ function App() {
           </label>
 
           <label>
-            国・所属
+            国
             <select value={country} onChange={(event) => setCountry(event.target.value)}>
               <option value="all">すべて</option>
               {countries.map((candidate) => (
-                <option key={candidate} value={candidate}>
-                  {candidate}
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
                 </option>
               ))}
             </select>
           </label>
+
+          <label>
+            国追加
+            <div className="inline-add">
+              <input value={newCountryName} onChange={(event) => setNewCountryName(event.target.value)} placeholder="例: 中国" />
+              <button type="button" onClick={addCountry}>
+                <Plus size={14} />
+              </button>
+            </div>
+          </label>
+
+          <div className="region-add-box">
+            <span>地域・ピン追加</span>
+            <select value={newRegionCountryId} onChange={(event) => setNewRegionCountryId(event.target.value)}>
+              {countries.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+            <input value={newRegionName} onChange={(event) => setNewRegionName(event.target.value)} placeholder="地域名" />
+            <div className="date-fields">
+              <input value={newRegionLatitude} onChange={(event) => setNewRegionLatitude(event.target.value)} placeholder="緯度" />
+              <input value={newRegionLongitude} onChange={(event) => setNewRegionLongitude(event.target.value)} placeholder="経度" />
+            </div>
+            <button type="button" onClick={addRegion}>
+              <Plus size={14} />
+              地域を追加
+            </button>
+          </div>
 
           <button
             className="reset-button"
@@ -546,6 +718,13 @@ function App() {
               >
                 {timelineLaneMode === "country" ? "国あり" : "国なし"}
               </button>
+              <button
+                className={showEraPeriods ? "active-tool" : ""}
+                type="button"
+                onClick={() => setShowEraPeriods((value) => !value)}
+              >
+                時代区分
+              </button>
               <button type="button" onClick={() => setTimelineZoom((value) => Math.max(0.1, value / 1.8))}>
                 <ZoomOut size={15} />
               </button>
@@ -578,6 +757,8 @@ function App() {
               zoom={timelineZoom}
               heightZoom={timelineHeightZoom}
               laneMode={timelineLaneMode}
+              countries={countries}
+              eras={showEraPeriods ? seedEraPeriods : []}
               onOpenRecord={openRecord}
             />
           )}
@@ -592,6 +773,15 @@ function App() {
 
           {viewMode === "cards" && (
             <AllCardsView cards={searchedCards} onOpenRecord={openRecord} />
+          )}
+
+          {viewMode === "map" && (
+            <MapView
+              items={searchedItems}
+              countries={countries}
+              regions={regions}
+              onOpenRecord={openRecord}
+            />
           )}
         </section>
         {(activeEvent || activePerson || activeTerm) && (
@@ -610,6 +800,8 @@ function App() {
             categories={categories}
             termCategories={termCategories}
             genres={genres}
+            countries={countries}
+            regions={regions}
             onUpdateEvent={updateEvent}
             onUpdatePerson={updatePerson}
             onUpdateTerm={updateTermCard}
@@ -637,6 +829,8 @@ function TimelineView({
   zoom,
   heightZoom,
   laneMode,
+  countries,
+  eras,
   onOpenRecord,
 }: {
   items: TimelineItem[];
@@ -645,13 +839,15 @@ function TimelineView({
   zoom: number;
   heightZoom: number;
   laneMode: TimelineLaneMode;
+  countries: Country[];
+  eras: EraPeriod[];
   onOpenRecord: (record: EditableRecord) => void;
 }) {
   const eventYears = items.flatMap((item) => [
     toYear(item.startDate),
     item.endDate ? toYear(item.endDate) : toYear(item.startDate),
   ]);
-  const personYears = people.flatMap((person) => [person.birthYear, person.deathYear]);
+  const personYears = people.flatMap((person) => [toYear(getPersonBirthDate(person)), toYear(getPersonDeathDate(person))]);
   if (eventYears.length === 0 && personYears.length === 0) {
     return (
       <div className="timeline-board">
@@ -673,13 +869,21 @@ function TimelineView({
   );
   const countryLanes =
     laneMode === "plain"
-      ? ["出来事"]
-      : country !== "all"
-        ? [country]
-        : Array.from(new Set(items.flatMap((item) => (item.relatedCountries.length ? item.relatedCountries : ["未分類"])))).slice(0, 20);
+        ? ["出来事"]
+        : country !== "all"
+          ? [country]
+          : Array.from(new Set(items.flatMap((item) => (getRecordCountryIds(item).length ? getRecordCountryIds(item) : ["unclassified"])))).slice(0, 20);
+  const visibleEras = eras.filter((era) => era.endYear >= minYear && era.startYear <= maxYear);
+  const eraGroups = Array.from(new Set(visibleEras.map((era) => era.group)));
+  const eraRowHeight = 28;
+  const eraHeight = visibleEras.length > 0 ? eraGroups.length * eraRowHeight + 10 : 0;
 
   function positionPercent(date: string) {
     return Math.min(100, Math.max(0, ((toYear(date) - minYear) / span) * 100));
+  }
+
+  function positionYearPercent(year: number) {
+    return Math.min(100, Math.max(0, ((year - minYear) / span) * 100));
   }
 
   const eventPlacements: EventPlacement[] = (() => {
@@ -689,9 +893,9 @@ function TimelineView({
           ? ["出来事"]
           : country !== "all"
             ? [country]
-            : item.relatedCountries.length
-              ? item.relatedCountries
-              : ["未分類"];
+            : getRecordCountryIds(item).length
+              ? getRecordCountryIds(item)
+              : ["unclassified"];
       return targetCountries
         .filter((targetCountry) => countryLanes.includes(targetCountry))
         .map((targetCountry) => {
@@ -729,7 +933,7 @@ function TimelineView({
   const personRowHeight = Math.max(140, Math.round((68 + personStackCount * 26) * heightZoom));
 
   function rowTop(lane: number) {
-    return lane * rowHeight;
+    return eraHeight + lane * rowHeight;
   }
 
   return (
@@ -740,6 +944,7 @@ function TimelineView({
           "--timeline-width": `${Math.round(1200 * zoom)}px`,
           "--row-height": `${rowHeight}px`,
           "--person-row-height": `${personRowHeight}px`,
+          "--era-height": `${eraHeight}px`,
         } as CSSProperties
       }
     >
@@ -753,10 +958,16 @@ function TimelineView({
 
       <div className="timeline-grid" style={{ "--country-rows": countryLanes.length } as CSSProperties}>
         <div className="lane-labels">
+          {visibleEras.length > 0 && (
+            <span className="era-label">
+              <b>代</b>
+              時代区分
+            </span>
+          )}
           {countryLanes.map((lane) => (
             <span key={lane}>
               <b>{laneMode === "plain" ? "年" : countryFlags[lane] ?? "◦"}</b>
-              {lane}
+              {laneMode === "plain" ? lane : getCountryName(countries, lane)}
             </span>
           ))}
           <span>
@@ -766,10 +977,36 @@ function TimelineView({
         </div>
 
         <div className="lane-canvas">
+          {visibleEras.length > 0 && (
+            <div className="era-band-layer">
+              {visibleEras.map((era) => {
+                const start = Math.max(era.startYear, minYear);
+                const end = Math.min(era.endYear, maxYear);
+                return (
+                  <span
+                    className="era-band"
+                    key={era.id}
+                    style={
+                      {
+                        "--left": `${positionYearPercent(start)}%`,
+                        "--width": `${Math.max(positionYearPercent(end) - positionYearPercent(start), 0.4)}%`,
+                        "--era-row": eraGroups.indexOf(era.group),
+                        "--era-color": era.color,
+                      } as CSSProperties
+                    }
+                    title={`${era.group}: ${era.name} (${toDisplayYear(era.startYear)}-${toDisplayYear(era.endYear)})`}
+                  >
+                    <small>{era.group}</small>
+                    {era.name}
+                  </span>
+                );
+              })}
+            </div>
+          )}
           {countryLanes.map((lane, index) => (
-            <div className="country-lane" key={lane} style={{ "--lane": index } as CSSProperties} />
+            <div className="country-lane" key={lane} style={{ "--lane": index, "--era-height": `${eraHeight}px` } as CSSProperties} />
           ))}
-          <div className="person-lane" style={{ "--lane-top": `${countryLanes.length * rowHeight}px` } as CSSProperties} />
+          <div className="person-lane" style={{ "--lane-top": `${eraHeight + countryLanes.length * rowHeight}px` } as CSSProperties} />
 
           {eventPlacements.map((placement) => {
             const { item } = placement;
@@ -802,8 +1039,8 @@ function TimelineView({
           })}
 
           {people.map((person, index) => {
-            const left = positionPercent(`${person.birthYear}-01-01`);
-            const right = positionPercent(`${person.deathYear}-12-31`);
+            const left = positionPercent(getPersonBirthDate(person));
+            const right = positionPercent(getPersonDeathDate(person));
             return (
               <button
                 className="person-line"
@@ -814,7 +1051,7 @@ function TimelineView({
                     "--left": `${left}%`,
                     "--width": `${Math.max(right - left, 4)}%`,
                     "--offset": index,
-                    "--top": `${countryLanes.length * rowHeight + 34 + index * 28}px`,
+                    "--top": `${eraHeight + countryLanes.length * rowHeight + 34 + index * 28}px`,
                   } as CSSProperties
                 }
                 type="button"
@@ -823,9 +1060,7 @@ function TimelineView({
                 <span className="hover-summary person-hover">
                   {(person.imageUrls ?? []).length > 0 && <img alt={person.name} src={person.imageUrls![0]} />}
                   <strong>{person.name}</strong>
-                  <b>
-                    {toDisplayYear(person.birthYear)}-{toDisplayYear(person.deathYear)}
-                  </b>
+                  <b>{toPersonLifeLabel(person)}</b>
                   <br />
                   {person.summary}
                 </span>
@@ -879,7 +1114,7 @@ function PeopleView({ people, onOpenRecord }: { people: Person[]; onOpenRecord: 
         <button className="person-card" key={person.id} onClick={() => onOpenRecord(person.id)} type="button">
           <span>{person.name}</span>
               <small>
-                {toDisplayYear(person.birthYear)}-{toDisplayYear(person.deathYear)}
+                {toPersonLifeLabel(person)}
               </small>
           <p>{person.summary}</p>
           <div className="chips">
@@ -889,6 +1124,147 @@ function PeopleView({ people, onOpenRecord }: { people: Person[]; onOpenRecord: 
           </div>
         </button>
       ))}
+    </div>
+  );
+}
+
+function MapView({
+  items,
+  countries,
+  regions,
+  onOpenRecord,
+}: {
+  items: TimelineItem[];
+  countries: Country[];
+  regions: Region[];
+  onOpenRecord: (record: EditableRecord) => void;
+}) {
+  const mapElementRef = useRef<HTMLDivElement | null>(null);
+  const [activeEventId, setActiveEventId] = useState("");
+  const googleMapsApiKey = String((import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
+  const eventPins = useMemo<EventMapPin[]>(
+    () =>
+      items.flatMap((item) =>
+        getRecordRegionIds(item)
+          .map((regionId) => {
+            const region = regions.find((candidate) => candidate.id === regionId);
+            return region ? { item, region } : undefined;
+          })
+          .filter((pin): pin is EventMapPin => Boolean(pin)),
+      ),
+    [items, regions],
+  );
+  const activeEventPin = eventPins.find((pin) => pin.item.id === activeEventId) ?? eventPins[0];
+
+  useEffect(() => {
+    if (!googleMapsApiKey || !mapElementRef.current || eventPins.length === 0) return;
+    let cancelled = false;
+
+    loadGoogleMaps(googleMapsApiKey).then(() => {
+      if (cancelled || !mapElementRef.current || !window.google?.maps) return;
+      const maps = window.google.maps;
+      const map = new maps.Map(mapElementRef.current, {
+        center: { lat: eventPins[0].region.latitude, lng: eventPins[0].region.longitude },
+        zoom: 5,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+      });
+      const bounds = new maps.LatLngBounds();
+      const infoWindow = new maps.InfoWindow();
+
+      eventPins.forEach((pin) => {
+        const position = { lat: pin.region.latitude, lng: pin.region.longitude };
+        const marker = new maps.Marker({
+          position,
+          map,
+          title: pin.item.title,
+          label: { text: "●", color: "#ffffff", fontSize: "12px" },
+        });
+        const content = `<strong>${pin.item.title}</strong><br><span>${pin.region.name}</span>`;
+        marker.addListener("mouseover", () => {
+          infoWindow.setContent(content);
+          infoWindow.open({ anchor: marker, map });
+        });
+        marker.addListener("click", () => {
+          setActiveEventId(pin.item.id);
+          infoWindow.setContent(content);
+          infoWindow.open({ anchor: marker, map });
+          onOpenRecord({ type: "event", id: pin.item.id });
+        });
+        bounds.extend(position);
+      });
+
+      if (eventPins.length === 1) {
+        map.setCenter({ lat: eventPins[0].region.latitude, lng: eventPins[0].region.longitude });
+        map.setZoom(7);
+      } else {
+        map.fitBounds(bounds, 64);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [eventPins, googleMapsApiKey, onOpenRecord]);
+
+  const fallbackMapUrl = activeEventPin
+    ? `https://www.google.com/maps?q=${activeEventPin.region.latitude},${activeEventPin.region.longitude}&z=6&output=embed`
+    : "https://www.google.com/maps?q=0,0&z=2&output=embed";
+
+  return (
+    <div className="map-board">
+      <section className="map-frame">
+        {googleMapsApiKey ? (
+          <div className="google-map-canvas" ref={mapElementRef} />
+        ) : (
+          <>
+            <iframe title="Googleマップ" src={fallbackMapUrl} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+            <div className="map-api-notice">
+              Google Maps APIキーを設定すると、ズームに追従する常設ピンが表示されます。
+            </div>
+          </>
+        )}
+      </section>
+      <aside className="map-events">
+        {eventPins.map((pin) => (
+          <button
+            className={activeEventPin?.item.id === pin.item.id ? "active" : ""}
+            key={`${pin.item.id}-${pin.region.id}`}
+            type="button"
+            onMouseEnter={() => setActiveEventId(pin.item.id)}
+            onFocus={() => setActiveEventId(pin.item.id)}
+            onClick={() => {
+              setActiveEventId(pin.item.id);
+              onOpenRecord({ type: "event", id: pin.item.id });
+            }}
+          >
+            <MapPin size={16} />
+            <span>
+              <strong>{pin.item.title}</strong>
+              <small>
+                {pin.region.name} / {getCountryName(countries, pin.region.countryId)}
+              </small>
+            </span>
+            <b>{toDisplayYear(toYear(pin.item.startDate))}</b>
+          </button>
+        ))}
+      </aside>
+      {activeEventPin && (
+        <section className="map-detail">
+          <span className="knowledge-label">
+            {activeEventPin.region.name} / {getCountryName(countries, activeEventPin.region.countryId)}
+          </span>
+          <h2>{activeEventPin.item.title}</h2>
+          <p>{activeEventPin.item.summary}</p>
+          <div className="map-record-list">
+            <button type="button" onClick={() => onOpenRecord({ type: "event", id: activeEventPin.item.id })}>
+              <span>詳細カード</span>
+              {activeEventPin.item.title}
+            </button>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -925,6 +1301,78 @@ function AllCardsView({
   );
 }
 
+function ChipEditor({
+  label,
+  values,
+  onChange,
+  options,
+  placeholder,
+  renderValue,
+}: {
+  label: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+  options?: Array<{ value: string; label: string }>;
+  placeholder?: string;
+  renderValue?: (value: string) => string;
+}) {
+  const [draft, setDraft] = useState("");
+  const optionLabels = new Map((options ?? []).map((option) => [option.label, option.value]));
+  const optionValues = new Set((options ?? []).map((option) => option.value));
+  const listId = `${label.replace(/\s/g, "-")}-options`;
+
+  function addValue() {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    const next = optionLabels.get(trimmed) ?? trimmed;
+    if (options && !optionValues.has(next)) return;
+    onChange(uniqueValues([...values, next]));
+    setDraft("");
+  }
+
+  return (
+    <div className="chip-editor">
+      <span>{label}</span>
+      <div className="chip-list editable">
+        {values.map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onChange(values.filter((item) => item !== value))}
+            title="クリックで削除"
+          >
+            #{renderValue ? renderValue(value) : value}
+          </button>
+        ))}
+      </div>
+      <div className="inline-add">
+        <input
+          list={options ? listId : undefined}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              addValue();
+            }
+          }}
+          placeholder={placeholder}
+        />
+        {options && (
+          <datalist id={listId}>
+            {options.map((option) => (
+              <option key={option.value} value={option.label} />
+            ))}
+          </datalist>
+        )}
+        <button type="button" onClick={addValue}>
+          <Plus size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DetailPanel({
   event,
   person,
@@ -936,6 +1384,8 @@ function DetailPanel({
   categories,
   termCategories,
   genres,
+  countries,
+  regions,
   onUpdateEvent,
   onUpdatePerson,
   onUpdateTerm,
@@ -952,6 +1402,8 @@ function DetailPanel({
   categories: Category[];
   termCategories: string[];
   genres: string[];
+  countries: Country[];
+  regions: Region[];
   onUpdateEvent: (id: string, patch: Partial<Event>) => void;
   onUpdatePerson: (id: string, patch: Partial<Person>) => void;
   onUpdateTerm: (id: string, patch: Partial<TermCard>) => void;
@@ -990,7 +1442,7 @@ function DetailPanel({
       {event && (
         <div className="detail-stack">
           <section className="detail-preview primary">
-            <div className="preview-images">
+            <div className={`preview-images ${getPreviewImageLayout(event.imageUrls)}`}>
               {(event.imageUrls ?? []).length > 0 ? (
                 <>
                   <img className="hero-blur" alt="" src={event.imageUrls![0]} />
@@ -999,20 +1451,23 @@ function DetailPanel({
               ) : (
                 <div className="image-placeholder">{event.title.slice(0, 1)}</div>
               )}
+              <div className="detail-hero-copy">
+                <span className="knowledge-label hero-kicker">
+                  <span className="hero-kicker-dot" />
+                  {event.category}
+                </span>
+                <h2>{event.title}</h2>
+                <small className="hero-date">
+                  <CalendarDays size={18} />
+                  {toLabelDate(event.startDate)}
+                  {event.endDate ? ` - ${toLabelDate(event.endDate)}` : ""}
+                </small>
+              </div>
             </div>
-            <span className="knowledge-label">出来事 / {event.category}</span>
-            <h2>{event.title}</h2>
-            <small>
-              {toLabelDate(event.startDate)}
-              {event.endDate ? ` - ${toLabelDate(event.endDate)}` : ""}
-            </small>
             <p>{renderLinkedText(event.detail, event.terms)}</p>
-            <div className="chips">
+            <div className="chips hashtag-list">
               {(event.genres ?? []).map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-              {event.relatedCountries.map((item) => (
-                <span key={item}>{item}</span>
+                <span key={item}>#{item}</span>
               ))}
             </div>
             {(event.references ?? []).length > 0 && (
@@ -1051,21 +1506,23 @@ function DetailPanel({
                     ))}
                 </select>
               </label>
-              <label>
-                ジャンル
-                <input
-                  list="genre-options"
-                  value={(event.genres ?? []).join(", ")}
-                  onChange={(input) => onUpdateEvent(event.id, { genres: splitValues(input.target.value) })}
-                />
-              </label>
-              <label>
-                関連国
-                <input
-                  value={event.relatedCountries.join(", ")}
-                  onChange={(input) => onUpdateEvent(event.id, { relatedCountries: splitValues(input.target.value) })}
-                />
-              </label>
+              <ChipEditor label="ジャンル" values={event.genres ?? []} onChange={(values) => onUpdateEvent(event.id, { genres: values })} placeholder="例: 暗殺" />
+              <ChipEditor
+                label="国"
+                values={getRecordCountryIds(event)}
+                onChange={(values) => onUpdateEvent(event.id, { countryIds: values })}
+                options={countries.map((country) => ({ value: country.id, label: country.name }))}
+                placeholder="国を選択"
+                renderValue={(value) => getCountryName(countries, value)}
+              />
+              <ChipEditor
+                label="地域・ピン"
+                values={getRecordRegionIds(event)}
+                onChange={(values) => onUpdateEvent(event.id, { regionIds: values })}
+                options={regions.map((region) => ({ value: region.id, label: `${getCountryName(countries, region.countryId)} / ${region.name}` }))}
+                placeholder="地域を選択"
+                renderValue={(value) => getRegionName(regions, value)}
+              />
               <label>
                 簡単な概要
                 <textarea value={event.summary} onChange={(input) => onUpdateEvent(event.id, { summary: input.target.value })} />
@@ -1078,24 +1535,9 @@ function DetailPanel({
                   onChange={(input) => onUpdateEvent(event.id, { detail: input.target.value })}
                 />
               </label>
-              <label>
-                紐付ける単語
-                <input value={event.terms.join(", ")} onChange={(input) => onUpdateEvent(event.id, { terms: splitValues(input.target.value) })} />
-              </label>
-              <label>
-                画像URL
-                <input
-                  value={(event.imageUrls ?? []).join("\n")}
-                  onChange={(input) => onUpdateEvent(event.id, { imageUrls: splitListValues(input.target.value) })}
-                />
-              </label>
-              <label>
-                参考資料
-                <textarea
-                  value={(event.references ?? []).join("\n")}
-                  onChange={(input) => onUpdateEvent(event.id, { references: input.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })}
-                />
-              </label>
+              <ChipEditor label="紐付ける単語" values={event.terms} onChange={(values) => onUpdateEvent(event.id, { terms: values })} placeholder="例: 第一次世界大戦" />
+              <ChipEditor label="画像URL" values={event.imageUrls ?? []} onChange={(values) => onUpdateEvent(event.id, { imageUrls: values })} placeholder="画像URLを追加" />
+              <ChipEditor label="参考資料" values={event.references ?? []} onChange={(values) => onUpdateEvent(event.id, { references: values })} placeholder="資料名・URLを追加" />
             </div>
           )}
         </div>
@@ -1104,7 +1546,7 @@ function DetailPanel({
       {person && (
         <div className="detail-stack">
           <section className="detail-preview primary">
-            <div className="preview-images">
+            <div className={`preview-images ${getPreviewImageLayout(person.imageUrls)}`}>
               {(person.imageUrls ?? []).length > 0 ? (
                 <>
                   <img className="hero-blur" alt="" src={person.imageUrls![0]} />
@@ -1113,19 +1555,22 @@ function DetailPanel({
               ) : (
                 <div className="image-placeholder">{person.name.slice(0, 1)}</div>
               )}
+              <div className="detail-hero-copy">
+                <span className="knowledge-label hero-kicker person">
+                  <span className="hero-kicker-dot" />
+                  人物
+                </span>
+                <h2>{person.name}</h2>
+                <small className="hero-date">
+                  <CalendarDays size={18} />
+                  {toPersonLifeLabel(person)}
+                </small>
+              </div>
             </div>
-            <span className="knowledge-label">人物</span>
-            <h2>{person.name}</h2>
-            <small>
-              {toDisplayYear(person.birthYear)}-{toDisplayYear(person.deathYear)}
-            </small>
-            <p>{renderLinkedText(person.summary, person.affiliations)}</p>
-            <div className="chips">
+            <p>{renderLinkedText(person.summary, [...person.affiliations, ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])}</p>
+            <div className="chips hashtag-list">
               {(person.genres ?? []).map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-              {person.affiliations.map((item) => (
-                <span key={item}>{item}</span>
+                <span key={item}>#{item}</span>
               ))}
             </div>
             {(person.references ?? []).length > 0 && (
@@ -1162,21 +1607,54 @@ function DetailPanel({
                   />
                 </label>
               </div>
-              <label>
-                所属・紐付ける単語
-                <input
-                  value={person.affiliations.join(", ")}
-                  onChange={(input) => onUpdatePerson(person.id, { affiliations: splitValues(input.target.value) })}
-                />
-              </label>
-              <label>
-                ジャンル
-                <input
-                  list="genre-options"
-                  value={(person.genres ?? []).join(", ")}
-                  onChange={(input) => onUpdatePerson(person.id, { genres: splitValues(input.target.value) })}
-                />
-              </label>
+              <div className="date-fields">
+                <label>
+                  生年月日
+                  <input
+                    placeholder="例: 1863-12-18"
+                    value={person.birthDate ?? ""}
+                    onChange={(input) => {
+                      const birthDate = input.target.value.trim();
+                      onUpdatePerson(person.id, {
+                        birthDate: birthDate || undefined,
+                        ...(birthDate ? { birthYear: toYear(birthDate) } : {}),
+                      });
+                    }}
+                  />
+                </label>
+                <label>
+                  没年月日
+                  <input
+                    placeholder="例: 1914-06-28"
+                    value={person.deathDate ?? ""}
+                    onChange={(input) => {
+                      const deathDate = input.target.value.trim();
+                      onUpdatePerson(person.id, {
+                        deathDate: deathDate || undefined,
+                        ...(deathDate ? { deathYear: toYear(deathDate) } : {}),
+                      });
+                    }}
+                  />
+                </label>
+              </div>
+              <ChipEditor label="所属・紐付ける単語" values={person.affiliations} onChange={(values) => onUpdatePerson(person.id, { affiliations: values })} placeholder="例: ハプスブルク家" />
+              <ChipEditor label="ジャンル" values={person.genres ?? []} onChange={(values) => onUpdatePerson(person.id, { genres: values })} placeholder="例: 政治家" />
+              <ChipEditor
+                label="国"
+                values={getRecordCountryIds(person)}
+                onChange={(values) => onUpdatePerson(person.id, { countryIds: values })}
+                options={countries.map((country) => ({ value: country.id, label: country.name }))}
+                placeholder="国を選択"
+                renderValue={(value) => getCountryName(countries, value)}
+              />
+              <ChipEditor
+                label="地域・ピン"
+                values={getRecordRegionIds(person)}
+                onChange={(values) => onUpdatePerson(person.id, { regionIds: values })}
+                options={regions.map((region) => ({ value: region.id, label: `${getCountryName(countries, region.countryId)} / ${region.name}` }))}
+                placeholder="地域を選択"
+                renderValue={(value) => getRegionName(regions, value)}
+              />
               <label>
                 概要
                 <textarea
@@ -1185,20 +1663,8 @@ function DetailPanel({
                   onChange={(input) => onUpdatePerson(person.id, { summary: input.target.value })}
                 />
               </label>
-              <label>
-                画像URL
-                <input
-                  value={(person.imageUrls ?? []).join("\n")}
-                  onChange={(input) => onUpdatePerson(person.id, { imageUrls: splitListValues(input.target.value) })}
-                />
-              </label>
-              <label>
-                参考資料
-                <textarea
-                  value={(person.references ?? []).join("\n")}
-                  onChange={(input) => onUpdatePerson(person.id, { references: input.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })}
-                />
-              </label>
+              <ChipEditor label="画像URL" values={person.imageUrls ?? []} onChange={(values) => onUpdatePerson(person.id, { imageUrls: values })} placeholder="画像URLを追加" />
+              <ChipEditor label="参考資料" values={person.references ?? []} onChange={(values) => onUpdatePerson(person.id, { references: values })} placeholder="資料名・URLを追加" />
             </div>
           )}
         </div>
@@ -1207,7 +1673,7 @@ function DetailPanel({
       {term && (
         <div className="detail-stack">
           <section className="detail-preview primary">
-            <div className="preview-images">
+            <div className={`preview-images ${getPreviewImageLayout(term.imageUrls)}`}>
               {(term.imageUrls ?? []).length > 0 ? (
                 <>
                   <img className="hero-blur" alt="" src={term.imageUrls![0]} />
@@ -1216,17 +1682,22 @@ function DetailPanel({
               ) : (
                 <div className="image-placeholder">{term.term.slice(0, 1)}</div>
               )}
+              <div className="detail-hero-copy">
+                <span className="knowledge-label hero-kicker term">
+                  <span className="hero-kicker-dot" />
+                  {term.category}
+                </span>
+                <h2>{term.term}</h2>
+                <small className="hero-date">
+                  <CalendarDays size={18} />
+                  {term.aliases.length ? `別名: ${term.aliases.join("、")}` : "単語カード"}
+                </small>
+              </div>
             </div>
-            <span className="knowledge-label">単語 / {term.category}</span>
-            <h2>{term.term}</h2>
-            <small>{term.aliases.length ? `別名: ${term.aliases.join("、")}` : "単語カード"}</small>
             <p>{renderLinkedText(term.detail, term.relatedTerms)}</p>
-            <div className="chips">
+            <div className="chips hashtag-list">
               {(term.genres ?? []).map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-              {term.relatedTerms.map((item) => (
-                <span key={item}>{item}</span>
+                <span key={item}>#{item}</span>
               ))}
             </div>
             {(term.references ?? []).length > 0 && (
@@ -1258,18 +1729,8 @@ function DetailPanel({
                   ))}
                 </select>
               </label>
-              <label>
-                ジャンル
-                <input
-                  list="genre-options"
-                  value={(term.genres ?? []).join(", ")}
-                  onChange={(input) => onUpdateTerm(term.id, { genres: splitValues(input.target.value) })}
-                />
-              </label>
-              <label>
-                別名
-                <input value={term.aliases.join(", ")} onChange={(input) => onUpdateTerm(term.id, { aliases: splitValues(input.target.value) })} />
-              </label>
+              <ChipEditor label="ジャンル" values={term.genres ?? []} onChange={(values) => onUpdateTerm(term.id, { genres: values })} placeholder="例: 思想史" />
+              <ChipEditor label="別名" values={term.aliases} onChange={(values) => onUpdateTerm(term.id, { aliases: values })} placeholder="別名を追加" />
               <label>
                 概要
                 <textarea value={term.summary} onChange={(input) => onUpdateTerm(term.id, { summary: input.target.value })} />
@@ -1282,27 +1743,9 @@ function DetailPanel({
                   onChange={(input) => onUpdateTerm(term.id, { detail: input.target.value })}
                 />
               </label>
-              <label>
-                紐付ける単語
-                <input
-                  value={term.relatedTerms.join(", ")}
-                  onChange={(input) => onUpdateTerm(term.id, { relatedTerms: splitValues(input.target.value) })}
-                />
-              </label>
-              <label>
-                画像URL
-                <input
-                  value={(term.imageUrls ?? []).join("\n")}
-                  onChange={(input) => onUpdateTerm(term.id, { imageUrls: splitListValues(input.target.value) })}
-                />
-              </label>
-              <label>
-                参考資料
-                <textarea
-                  value={(term.references ?? []).join("\n")}
-                  onChange={(input) => onUpdateTerm(term.id, { references: input.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })}
-                />
-              </label>
+              <ChipEditor label="紐付ける単語" values={term.relatedTerms} onChange={(values) => onUpdateTerm(term.id, { relatedTerms: values })} placeholder="例: ポリス" />
+              <ChipEditor label="画像URL" values={term.imageUrls ?? []} onChange={(values) => onUpdateTerm(term.id, { imageUrls: values })} placeholder="画像URLを追加" />
+              <ChipEditor label="参考資料" values={term.references ?? []} onChange={(values) => onUpdateTerm(term.id, { references: values })} placeholder="資料名・URLを追加" />
             </div>
           )}
         </div>

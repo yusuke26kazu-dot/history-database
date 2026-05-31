@@ -31,7 +31,17 @@ npm install
 npm run dev
 ```
 
-初期状態では、カテゴリ `戦争` と国 `オーストリア＝ハンガリー帝国` の条件で表示します。
+地図ビューでGoogleマップのピンを使うには、Google Maps JavaScript API のキーを `.env.local` に設定します。
+
+```bash
+VITE_GOOGLE_MAPS_API_KEY=ここにAPIキー
+```
+
+Netlifyでは、プロジェクト設定の Environment variables に同じ名前で追加します。
+
+```text
+VITE_GOOGLE_MAPS_API_KEY
+```
 
 すぐ手元で開きたい場合:
 

@@ -5,6 +5,10 @@ export type Person = {
   name: string;
   birthYear: number;
   deathYear: number;
+  birthDate?: string;
+  deathDate?: string;
+  countryIds?: string[];
+  regionIds?: string[];
   affiliations: string[];
   summary: string;
   genres?: string[];
@@ -19,6 +23,8 @@ export type Event = {
   endDate?: string;
   category: Category;
   relatedCountries: string[];
+  countryIds?: string[];
+  regionIds?: string[];
   summary: string;
   detail: string;
   terms: string[];
@@ -44,6 +50,30 @@ export type TermCard = {
   genres?: string[];
   imageUrls?: string[];
   references?: string[];
+};
+
+export type EraPeriod = {
+  id: string;
+  name: string;
+  group: string;
+  startYear: number;
+  endYear: number;
+  color: string;
+};
+
+export type Country = {
+  id: string;
+  name: string;
+  aliases?: string[];
+};
+
+export type Region = {
+  id: string;
+  countryId: Country["id"];
+  name: string;
+  latitude: number;
+  longitude: number;
+  note?: string;
 };
 
 export type TimelineItem = Event & {
