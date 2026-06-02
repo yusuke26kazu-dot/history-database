@@ -1509,8 +1509,6 @@ function MapView({
         });
       googleMapRef.current = map;
       const bounds = new maps.LatLngBounds();
-      const infoWindow = mapInfoWindowRef.current ?? new maps.InfoWindow();
-      mapInfoWindowRef.current = infoWindow;
 
       mapMarkersRef.current.forEach((overlay) => overlay.setMap(null));
       mapMarkersRef.current = [];
@@ -1519,7 +1517,6 @@ function MapView({
         const position = { lat: pin.latitude, lng: pin.longitude };
         const overlay = new maps.OverlayView();
         let element: HTMLButtonElement | null = null;
-        const content = `<strong>${escapeHtml(pin.item.title)}</strong><br><span>${escapeHtml(pin.locationName)}</span>`;
         overlay.onAdd = () => {
           element = document.createElement("button");
           element.type = "button";
@@ -1527,17 +1524,9 @@ function MapView({
           element.title = pin.item.title;
           element.setAttribute("aria-label", pin.item.title);
           element.innerHTML = `<span>${escapeHtml(pin.item.title)}</span>`;
-          element.addEventListener("mouseenter", () => {
-            infoWindow.setContent(content);
-            infoWindow.setPosition(position);
-            infoWindow.open({ map });
-          });
           element.addEventListener("click", () => {
             setFocusedEventId(pin.item.id);
             setPreviewEventId(pin.item.id);
-            infoWindow.setContent(content);
-            infoWindow.setPosition(position);
-            infoWindow.open({ map });
           });
           overlay.getPanes()?.overlayMouseTarget.appendChild(element);
         };

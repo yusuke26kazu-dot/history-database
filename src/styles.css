@@ -2103,8 +2103,8 @@ textarea:focus {
 
 .custom-map-pin span {
   position: absolute;
-  left: 28px;
-  top: -8px;
+  right: 18px;
+  bottom: 30px;
   display: none;
   min-width: max-content;
   max-width: 220px;
