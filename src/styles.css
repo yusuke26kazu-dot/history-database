@@ -2068,10 +2068,10 @@ textarea:focus {
   height: 28px;
   border: 0;
   border-radius: 999px;
-  background: #25b99f;
+  background: #e53935;
   color: transparent;
   cursor: pointer;
-  box-shadow: 0 0 0 5px rgb(37 185 159 / 18%), 0 12px 24px rgb(31 49 58 / 22%);
+  box-shadow: 0 0 0 5px rgb(229 57 53 / 20%), 0 12px 24px rgb(31 49 58 / 22%);
   transform: translate(-50%, -100%);
 }
 
@@ -2098,7 +2098,7 @@ textarea:focus {
 
 .custom-map-pin:hover,
 .custom-map-pin:focus-visible {
-  background: #20313a;
+  background: #b71c1c;
 }
 
 .custom-map-pin span {
