@@ -11,6 +11,7 @@ export type Person = {
   regionIds?: string[];
   affiliations: string[];
   summary: string;
+  contentBlocks?: ContentBlock[];
   genres?: string[];
   imageUrls?: string[];
   references?: string[];
@@ -25,9 +26,13 @@ export type Event = {
   relatedCountries: string[];
   countryIds?: string[];
   regionIds?: string[];
+  locationName?: string;
+  locationLat?: number;
+  locationLng?: number;
   summary: string;
   detail: string;
   terms: string[];
+  contentBlocks?: ContentBlock[];
   genres?: string[];
   imageUrls?: string[];
   references?: string[];
@@ -47,9 +52,17 @@ export type TermCard = {
   detail: string;
   aliases: string[];
   relatedTerms: string[];
+  contentBlocks?: ContentBlock[];
   genres?: string[];
   imageUrls?: string[];
   references?: string[];
+};
+
+export type ContentBlock = {
+  id: string;
+  type: "paragraph" | "heading" | "subheading" | "quote" | "image" | "video";
+  text: string;
+  caption?: string;
 };
 
 export type EraPeriod = {

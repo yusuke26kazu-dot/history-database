@@ -24,7 +24,7 @@ import {
   regions as seedRegions,
   termCards as seedTermCards,
 } from "./data/ww1";
-import type { Category, Country, EditableRecord, EraPeriod, Event, Person, Region, TermCard, TimelineItem } from "./models";
+import type { Category, ContentBlock, Country, EditableRecord, EraPeriod, Event, Person, Region, TermCard, TimelineItem } from "./models";
 import { buildTimelineItems, filterTimelineItems, getHistoricalYear } from "./query";
 
 type ViewMode = "timeline" | "category" | "people" | "cards" | "map";
@@ -41,7 +41,10 @@ type KnowledgeCard = {
 };
 type EventMapPin = {
   item: TimelineItem;
-  region: Region;
+  locationName: string;
+  latitude: number;
+  longitude: number;
+  countryId: string | undefined;
 };
 type PersistedDatabase = {
   version: number;
@@ -226,8 +229,21 @@ function getRecordRegionIds(record: Event | Person) {
   return record.regionIds ?? [];
 }
 
+function hasCoordinates(record: Event) {
+  return typeof record.locationLat === "number" && typeof record.locationLng === "number";
+}
+
 function matchesSearch(value: string, query: string) {
   return value.toLocaleLowerCase("ja").includes(query.trim().toLocaleLowerCase("ja"));
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function makeId(prefix: string) {
@@ -275,6 +291,36 @@ function writeLocalDatabase(data: PersistedDatabase) {
     window.localStorage.setItem("history-database:data", JSON.stringify(data));
   } catch {
     // localStorage can be unavailable in private browsing or strict file contexts.
+  }
+}
+
+function blockText(blocks?: ContentBlock[]) {
+  return (blocks ?? []).map((block) => `${block.text} ${block.caption ?? ""}`).join(" ");
+}
+
+function renderRichText(text: string) {
+  const pattern = /(\*\*[^*]+\*\*)/g;
+  return text.split(pattern).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={`${part}-${index}`}>{part}</span>;
+  });
+}
+
+function toEmbedUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.hostname.includes("youtube.com")) {
+      const id = url.searchParams.get("v");
+      return id ? `https://www.youtube.com/embed/${id}` : value;
+    }
+    if (url.hostname.includes("youtu.be")) {
+      return `https://www.youtube.com/embed/${url.pathname.replace("/", "")}`;
+    }
+    return value;
+  } catch {
+    return value;
   }
 }
 
@@ -340,6 +386,8 @@ function App() {
           item.category,
           item.summary,
           item.detail,
+          item.locationName ?? "",
+          blockText(item.contentBlocks),
           getRecordCountryIds(item).map((id) => getCountryName(countries, id)).join(" "),
           getRecordRegionIds(item).map((id) => getRegionName(regions, id)).join(" "),
           (item.genres ?? []).join(" "),
@@ -350,7 +398,7 @@ function App() {
         searchQuery,
       ),
     );
-  }, [filteredItems, searchQuery]);
+  }, [filteredItems, searchQuery, countries, regions]);
 
   const relatedPeople = useMemo(() => {
     const linkedIds = new Set(searchedItems.flatMap((item) => item.people.map((person) => person.id)));
@@ -363,6 +411,7 @@ function App() {
           [
             person.name,
             person.summary,
+            blockText(person.contentBlocks),
             getRecordCountryIds(person).map((id) => getCountryName(countries, id)).join(" "),
             getRecordRegionIds(person).map((id) => getRegionName(regions, id)).join(" "),
             person.affiliations.join(" "),
@@ -399,6 +448,8 @@ function App() {
         event.category,
         event.summary,
         event.detail,
+        event.locationName ?? "",
+        blockText(event.contentBlocks),
         getRecordCountryIds(event).map((id) => getCountryName(countries, id)).join(" "),
         getRecordRegionIds(event).map((id) => getRegionName(regions, id)).join(" "),
         (event.genres ?? []).join(" "),
@@ -417,6 +468,7 @@ function App() {
       searchText: [
         person.name,
         person.summary,
+        blockText(person.contentBlocks),
         getRecordCountryIds(person).map((id) => getCountryName(countries, id)).join(" "),
         getRecordRegionIds(person).map((id) => getRegionName(regions, id)).join(" "),
         person.affiliations.join(" "),
@@ -436,6 +488,7 @@ function App() {
         term.category,
         term.summary,
         term.detail,
+        blockText(term.contentBlocks),
         term.aliases.join(" "),
         term.relatedTerms.join(" "),
         (term.genres ?? []).join(" "),
@@ -564,6 +617,7 @@ function App() {
       summary: "概要を入力してください。",
       detail: "詳細を入力してください。",
       terms: [],
+      contentBlocks: [],
       genres: [],
       imageUrls: [],
       references: [],
@@ -584,6 +638,7 @@ function App() {
       regionIds: [],
       affiliations: [],
       summary: "人物の概要を入力してください。",
+      contentBlocks: [],
       genres: [],
       imageUrls: [],
       references: [],
@@ -603,6 +658,7 @@ function App() {
       detail: "単語の詳細を入力してください。",
       aliases: [],
       relatedTerms: [],
+      contentBlocks: [],
       genres: [],
       imageUrls: [],
       references: [],
@@ -921,6 +977,7 @@ function App() {
               countries={countries}
               regions={regions}
               onOpenRecord={openRecord}
+              onUpdateEvent={updateEvent}
             />
           )}
         </section>
@@ -1071,7 +1128,26 @@ function TimelineView({
   })();
 
   const maxEventStack = Math.max(0, ...eventPlacements.map((placement) => placement.stack));
-  const personStackCount = Math.max(1, people.length);
+  const personPlacements = people
+    .map((person) => {
+      const left = positionPercent(getPersonBirthDate(person));
+      const right = positionPercent(getPersonDeathDate(person));
+      return {
+        person,
+        left,
+        width: Math.max(right - left, 4),
+        stack: 0,
+      };
+    })
+    .sort((a, b) => a.left - b.left);
+  const personStackEnds: number[] = [];
+  personPlacements.forEach((placement) => {
+    const stack = personStackEnds.findIndex((end) => placement.left > end + 1);
+    const nextStack = stack === -1 ? personStackEnds.length : stack;
+    placement.stack = nextStack;
+    personStackEnds[nextStack] = placement.left + placement.width;
+  });
+  const personStackCount = Math.max(1, personStackEnds.length);
   const rowHeight = Math.max(116, Math.round((104 + maxEventStack * 32) * heightZoom));
   const personRowHeight = Math.max(140, Math.round((68 + personStackCount * 26) * heightZoom));
 
@@ -1132,33 +1208,19 @@ function TimelineView({
     >
       <div className="timeline-scale" aria-hidden="true">
         {yearTicks.map((year) => (
-          <span key={year} style={{ "--left": `${positionPercent(`${year}-01-01`)}%` } as CSSProperties}>
+          <span key={year} style={{ "--left": `${positionYearPercent(year)}%` } as CSSProperties}>
             {toDisplayYear(year)}
           </span>
         ))}
       </div>
 
       <div className="timeline-grid" style={{ "--country-rows": countryLanes.length } as CSSProperties}>
-        <div className="lane-labels">
-          {visibleEras.length > 0 && (
-            <span className="era-label">
-              <b>代</b>
-              時代区分
-            </span>
-          )}
-          {countryLanes.map((lane) => (
-            <span key={lane}>
-              <b>{laneMode === "plain" ? "年" : countryFlags[lane] ?? "◦"}</b>
-              {laneMode === "plain" ? lane : getCountryName(countries, lane)}
-            </span>
-          ))}
-          <span>
-            <b>人</b>
-            人物レイヤー
-          </span>
-        </div>
-
         <div className="lane-canvas">
+          <div className="timeline-tick-lines" aria-hidden="true">
+            {yearTicks.map((year) => (
+              <span key={year} style={{ "--left": `${positionYearPercent(year)}%` } as CSSProperties} />
+            ))}
+          </div>
           {visibleEras.length > 0 && (
             <div className="era-band-layer">
               {visibleEras.map((era) => {
@@ -1220,9 +1282,8 @@ function TimelineView({
             );
           })}
 
-          {people.map((person, index) => {
-            const left = positionPercent(getPersonBirthDate(person));
-            const right = positionPercent(getPersonDeathDate(person));
+          {personPlacements.map((placement) => {
+            const { person } = placement;
             return (
               <button
                 className="person-line"
@@ -1230,10 +1291,10 @@ function TimelineView({
                 onClick={() => onOpenRecord({ type: "person", id: person.id })}
                 style={
                   {
-                    "--left": `${left}%`,
-                    "--width": `${Math.max(right - left, 4)}%`,
-                    "--offset": index,
-                    "--top": `${eraHeight + countryLanes.length * rowHeight + 34 + index * 28}px`,
+                    "--left": `${placement.left}%`,
+                    "--width": `${placement.width}%`,
+                    "--offset": placement.stack,
+                    "--top": `${eraHeight + countryLanes.length * rowHeight + 34 + placement.stack * 28}px`,
                   } as CSSProperties
                 }
                 type="button"
@@ -1315,31 +1376,121 @@ function MapView({
   countries,
   regions,
   onOpenRecord,
+  onUpdateEvent,
 }: {
   items: TimelineItem[];
   countries: Country[];
   regions: Region[];
   onOpenRecord: (record: EditableRecord) => void;
+  onUpdateEvent: (id: string, patch: Partial<Event>) => void;
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
-  const [activeEventId, setActiveEventId] = useState("");
+  const googleMapRef = useRef<any>(null);
+  const mapInfoWindowRef = useRef<any>(null);
+  const mapMarkersRef = useRef<any[]>([]);
+  const [focusedEventId, setFocusedEventId] = useState("");
+  const [previewEventId, setPreviewEventId] = useState("");
   const [mapError, setMapError] = useState(false);
+  const [geocodedLocations, setGeocodedLocations] = useState<Record<string, { latitude: number; longitude: number }>>({});
   const googleMapsApiKey = String((import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
-  const eventPins = useMemo<EventMapPin[]>(
-    () =>
-      items
-        .map((item) => {
-          const regionId = getRecordRegionIds(item)[0];
-          const region = regionId ? regions.find((candidate) => candidate.id === regionId) : undefined;
-          return region ? { item, region } : undefined;
-        })
-        .filter((pin): pin is EventMapPin => Boolean(pin)),
-    [items, regions],
-  );
-  const activeEventPin = eventPins.find((pin) => pin.item.id === activeEventId) ?? eventPins[0];
+  const isFileProtocol = window.location.protocol === "file:";
+  const eventPins = useMemo<EventMapPin[]>(() => {
+    return items
+      .map((item): EventMapPin | undefined => {
+        const locationName = item.locationName?.trim();
+        if (locationName && hasCoordinates(item)) {
+          return {
+            item,
+            locationName,
+            latitude: item.locationLat as number,
+            longitude: item.locationLng as number,
+            countryId: getRecordCountryIds(item)[0],
+          };
+        }
+
+        const geocoded = locationName ? geocodedLocations[item.id] : undefined;
+        if (locationName && geocoded) {
+          return {
+            item,
+            locationName,
+            latitude: geocoded.latitude,
+            longitude: geocoded.longitude,
+            countryId: getRecordCountryIds(item)[0],
+          };
+        }
+
+        const regionId = !locationName ? getRecordRegionIds(item)[0] : undefined;
+        const region = regionId ? regions.find((candidate) => candidate.id === regionId) : undefined;
+        return region
+          ? {
+              item,
+              locationName: region.name,
+              latitude: region.latitude,
+              longitude: region.longitude,
+              countryId: region.countryId,
+            }
+          : undefined;
+      })
+      .filter((pin): pin is EventMapPin => Boolean(pin));
+  }, [geocodedLocations, items, regions]);
+  const focusedEventPin = eventPins.find((pin) => pin.item.id === focusedEventId);
+  const previewEventPin = eventPins.find((pin) => pin.item.id === previewEventId);
 
   useEffect(() => {
-    if (!googleMapsApiKey || !mapElementRef.current || eventPins.length === 0) return;
+    if (!focusedEventPin || !googleMapRef.current) return;
+    googleMapRef.current.panTo({ lat: focusedEventPin.latitude, lng: focusedEventPin.longitude });
+    googleMapRef.current.setZoom(Math.max(googleMapRef.current.getZoom() ?? 7, 7));
+  }, [focusedEventPin]);
+
+  useEffect(() => {
+    if (!googleMapsApiKey || isFileProtocol) return;
+    const pendingItems = items.filter((item) => {
+      const locationName = item.locationName?.trim();
+      return locationName && !hasCoordinates(item) && !geocodedLocations[item.id];
+    });
+    if (pendingItems.length === 0) return;
+
+    let cancelled = false;
+    setMapError(false);
+    window.gm_authFailure = () => setMapError(true);
+
+    const timeout = window.setTimeout(() => {
+      loadGoogleMaps(googleMapsApiKey)
+        .then(() => {
+          if (cancelled || !window.google?.maps) return;
+          const geocoder = new window.google.maps.Geocoder();
+          pendingItems.forEach((item) => {
+            const address = item.locationName?.trim();
+            if (!address) return;
+            geocoder.geocode({ address }, (results: any[], status: string) => {
+              if (cancelled || status !== "OK" || !results?.[0]?.geometry?.location) return;
+              const location = results[0].geometry.location;
+              const nextLocation = {
+                latitude: location.lat(),
+                longitude: location.lng(),
+              };
+              setGeocodedLocations((current) => ({ ...current, [item.id]: nextLocation }));
+              onUpdateEvent(item.id, {
+                locationLat: nextLocation.latitude,
+                locationLng: nextLocation.longitude,
+                regionIds: [],
+              });
+            });
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setMapError(true);
+        });
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [geocodedLocations, googleMapsApiKey, isFileProtocol, items, onUpdateEvent]);
+
+  useEffect(() => {
+    if (!googleMapsApiKey || isFileProtocol || !mapElementRef.current || eventPins.length === 0) return;
     let cancelled = false;
     setMapError(false);
     window.gm_authFailure = () => setMapError(true);
@@ -1347,40 +1498,68 @@ function MapView({
     loadGoogleMaps(googleMapsApiKey).then(() => {
       if (cancelled || !mapElementRef.current || !window.google?.maps) return;
       const maps = window.google.maps;
-      const map = new maps.Map(mapElementRef.current, {
-        center: { lat: eventPins[0].region.latitude, lng: eventPins[0].region.longitude },
-        zoom: 5,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: true,
-      });
+      const map =
+        googleMapRef.current ??
+        new maps.Map(mapElementRef.current, {
+          center: { lat: eventPins[0].latitude, lng: eventPins[0].longitude },
+          zoom: 5,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+        });
+      googleMapRef.current = map;
       const bounds = new maps.LatLngBounds();
-      const infoWindow = new maps.InfoWindow();
+      const infoWindow = mapInfoWindowRef.current ?? new maps.InfoWindow();
+      mapInfoWindowRef.current = infoWindow;
+
+      mapMarkersRef.current.forEach((overlay) => overlay.setMap(null));
+      mapMarkersRef.current = [];
 
       eventPins.forEach((pin) => {
-        const position = { lat: pin.region.latitude, lng: pin.region.longitude };
-        const marker = new maps.Marker({
-          position,
-          map,
-          title: pin.item.title,
-          label: { text: "●", color: "#ffffff", fontSize: "12px" },
-        });
-        const content = `<strong>${pin.item.title}</strong><br><span>${pin.region.name}</span>`;
-        marker.addListener("mouseover", () => {
-          infoWindow.setContent(content);
-          infoWindow.open({ anchor: marker, map });
-        });
-        marker.addListener("click", () => {
-          setActiveEventId(pin.item.id);
-          infoWindow.setContent(content);
-          infoWindow.open({ anchor: marker, map });
-          onOpenRecord({ type: "event", id: pin.item.id });
-        });
+        const position = { lat: pin.latitude, lng: pin.longitude };
+        const overlay = new maps.OverlayView();
+        let element: HTMLButtonElement | null = null;
+        const content = `<strong>${escapeHtml(pin.item.title)}</strong><br><span>${escapeHtml(pin.locationName)}</span>`;
+        overlay.onAdd = () => {
+          element = document.createElement("button");
+          element.type = "button";
+          element.className = "custom-map-pin";
+          element.title = pin.item.title;
+          element.setAttribute("aria-label", pin.item.title);
+          element.innerHTML = `<span>${escapeHtml(pin.item.title)}</span>`;
+          element.addEventListener("mouseenter", () => {
+            infoWindow.setContent(content);
+            infoWindow.setPosition(position);
+            infoWindow.open({ map });
+          });
+          element.addEventListener("click", () => {
+            setFocusedEventId(pin.item.id);
+            setPreviewEventId(pin.item.id);
+            infoWindow.setContent(content);
+            infoWindow.setPosition(position);
+            infoWindow.open({ map });
+          });
+          overlay.getPanes()?.overlayMouseTarget.appendChild(element);
+        };
+        overlay.draw = () => {
+          if (!element) return;
+          const projection = overlay.getProjection();
+          const point = projection?.fromLatLngToDivPixel(new maps.LatLng(position.lat, position.lng));
+          if (!point) return;
+          element.style.left = `${point.x}px`;
+          element.style.top = `${point.y}px`;
+        };
+        overlay.onRemove = () => {
+          element?.remove();
+          element = null;
+        };
+        overlay.setMap(map);
+        mapMarkersRef.current.push(overlay);
         bounds.extend(position);
       });
 
       if (eventPins.length === 1) {
-        map.setCenter({ lat: eventPins[0].region.latitude, lng: eventPins[0].region.longitude });
+        map.setCenter({ lat: eventPins[0].latitude, lng: eventPins[0].longitude });
         map.setZoom(7);
       } else {
         map.fitBounds(bounds, 64);
@@ -1392,63 +1571,57 @@ function MapView({
     return () => {
       cancelled = true;
     };
-  }, [eventPins, googleMapsApiKey, onOpenRecord]);
-
-  const fallbackMapUrl = activeEventPin
-    ? `https://www.google.com/maps?q=${activeEventPin.region.latitude},${activeEventPin.region.longitude}&z=6&output=embed`
-    : "https://www.google.com/maps?q=0,0&z=2&output=embed";
+  }, [eventPins, googleMapsApiKey, isFileProtocol]);
 
   return (
     <div className="map-board">
       <section className="map-frame">
-        {googleMapsApiKey && !mapError ? (
-          <div className="google-map-canvas" ref={mapElementRef} />
-        ) : (
-          <>
-            <iframe title="Googleマップ" src={fallbackMapUrl} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
-            <div className="map-api-notice">
-              {mapError
-                ? "Google Maps APIキーの許可元設定を確認してください。ローカルは http://localhost:5173/ で開くと安定します。"
-                : "Google Maps APIキーを設定すると、ズームに追従する常設ピンが表示されます。"}
-            </div>
-          </>
+        <div className="google-map-canvas" ref={mapElementRef} />
+        {(!googleMapsApiKey || isFileProtocol || mapError) && (
+          <div className="map-api-notice">
+            {!googleMapsApiKey
+              ? "Google Maps APIキーが未設定です。"
+              : isFileProtocol
+                ? "file:// で開いているためGoogleマップを読み込めません。ターミナルで npm run dev を実行し、http://localhost:5173/ で開いてください。"
+                : "Google Maps APIキーの許可元設定を確認してください。"}
+          </div>
         )}
       </section>
       <aside className="map-events">
         {eventPins.map((pin) => (
           <button
-            className={activeEventPin?.item.id === pin.item.id ? "active" : ""}
-            key={`${pin.item.id}-${pin.region.id}`}
+            className={focusedEventId === pin.item.id || previewEventId === pin.item.id ? "active" : ""}
+            key={`${pin.item.id}-${pin.locationName}`}
             type="button"
-            onMouseEnter={() => setActiveEventId(pin.item.id)}
-            onFocus={() => setActiveEventId(pin.item.id)}
             onClick={() => {
-              setActiveEventId(pin.item.id);
-              onOpenRecord({ type: "event", id: pin.item.id });
+              setFocusedEventId(pin.item.id);
+              setPreviewEventId("");
             }}
           >
             <MapPin size={16} />
             <span>
               <strong>{pin.item.title}</strong>
               <small>
-                {pin.region.name} / {getCountryName(countries, pin.region.countryId)}
+                {pin.locationName}
+                {pin.countryId ? ` / ${getCountryName(countries, pin.countryId)}` : ""}
               </small>
             </span>
             <b>{toDisplayYear(toYear(pin.item.startDate))}</b>
           </button>
         ))}
       </aside>
-      {activeEventPin && (
+      {previewEventPin && (
         <section className="map-detail">
           <span className="knowledge-label">
-            {activeEventPin.region.name} / {getCountryName(countries, activeEventPin.region.countryId)}
+            {previewEventPin.locationName}
+            {previewEventPin.countryId ? ` / ${getCountryName(countries, previewEventPin.countryId)}` : ""}
           </span>
-          <h2>{activeEventPin.item.title}</h2>
-          <p>{activeEventPin.item.summary}</p>
+          <h2>{previewEventPin.item.title}</h2>
+          <p>{previewEventPin.item.summary}</p>
           <div className="map-record-list">
-            <button type="button" onClick={() => onOpenRecord({ type: "event", id: activeEventPin.item.id })}>
+            <button type="button" onClick={() => onOpenRecord({ type: "event", id: previewEventPin.item.id })}>
               <span>詳細カード</span>
-              {activeEventPin.item.title}
+              {previewEventPin.item.title}
             </button>
           </div>
         </section>
@@ -1598,6 +1771,125 @@ function DetailHeroImage({
   );
 }
 
+function RichContentView({ blocks }: { blocks?: ContentBlock[] }) {
+  if (!blocks?.length) return null;
+
+  return (
+    <div className="rich-content">
+      {blocks.map((block) => {
+        if (block.type === "heading") {
+          return <h2 key={block.id}>{renderRichText(block.text)}</h2>;
+        }
+        if (block.type === "subheading") {
+          return <h3 key={block.id}>{renderRichText(block.text)}</h3>;
+        }
+        if (block.type === "quote") {
+          return <blockquote key={block.id}>{renderRichText(block.text)}</blockquote>;
+        }
+        if (block.type === "image") {
+          return (
+            <figure key={block.id}>
+              <img alt={block.caption || "本文画像"} src={block.text} />
+              {block.caption && <figcaption>{renderRichText(block.caption)}</figcaption>}
+            </figure>
+          );
+        }
+        if (block.type === "video") {
+          return (
+            <figure key={block.id}>
+              <iframe title={block.caption || block.text} src={toEmbedUrl(block.text)} allowFullScreen />
+              {block.caption && <figcaption>{renderRichText(block.caption)}</figcaption>}
+            </figure>
+          );
+        }
+        return <p key={block.id}>{renderRichText(block.text)}</p>;
+      })}
+    </div>
+  );
+}
+
+function RichContentEditor({
+  blocks,
+  onChange,
+}: {
+  blocks?: ContentBlock[];
+  onChange: (blocks: ContentBlock[]) => void;
+}) {
+  const currentBlocks = blocks ?? [];
+
+  function updateBlock(id: string, patch: Partial<ContentBlock>) {
+    onChange(currentBlocks.map((block) => (block.id === id ? { ...block, ...patch } : block)));
+  }
+
+  function addBlock(type: ContentBlock["type"]) {
+    onChange([
+      ...currentBlocks,
+      {
+        id: makeId("block"),
+        type,
+        text: type === "image" || type === "video" ? "" : "本文を入力",
+        caption: "",
+      },
+    ]);
+  }
+
+  function removeBlock(id: string) {
+    onChange(currentBlocks.filter((block) => block.id !== id));
+  }
+
+  function moveBlock(id: string, direction: -1 | 1) {
+    const index = currentBlocks.findIndex((block) => block.id === id);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= currentBlocks.length) return;
+    const nextBlocks = [...currentBlocks];
+    [nextBlocks[index], nextBlocks[nextIndex]] = [nextBlocks[nextIndex], nextBlocks[index]];
+    onChange(nextBlocks);
+  }
+
+  return (
+    <div className="rich-editor">
+      <div className="rich-editor-add">
+        <button type="button" onClick={() => addBlock("paragraph")}>本文</button>
+        <button type="button" onClick={() => addBlock("heading")}>見出し</button>
+        <button type="button" onClick={() => addBlock("subheading")}>小見出し</button>
+        <button type="button" onClick={() => addBlock("quote")}>引用</button>
+        <button type="button" onClick={() => addBlock("image")}>画像</button>
+        <button type="button" onClick={() => addBlock("video")}>動画</button>
+      </div>
+      {currentBlocks.map((block) => (
+        <div className="rich-editor-block" key={block.id}>
+          <div className="rich-editor-row">
+            <select value={block.type} onChange={(event) => updateBlock(block.id, { type: event.target.value as ContentBlock["type"] })}>
+              <option value="paragraph">本文</option>
+              <option value="heading">見出し</option>
+              <option value="subheading">小見出し</option>
+              <option value="quote">引用</option>
+              <option value="image">画像</option>
+              <option value="video">動画</option>
+            </select>
+            <button type="button" onClick={() => moveBlock(block.id, -1)}>↑</button>
+            <button type="button" onClick={() => moveBlock(block.id, 1)}>↓</button>
+            <button type="button" onClick={() => removeBlock(block.id)}>削除</button>
+          </div>
+          {block.type === "paragraph" || block.type === "quote" ? (
+            <textarea value={block.text} onChange={(event) => updateBlock(block.id, { text: event.target.value })} />
+          ) : (
+            <input
+              value={block.text}
+              onChange={(event) => updateBlock(block.id, { text: event.target.value })}
+              placeholder={block.type === "image" ? "画像URL" : block.type === "video" ? "YouTubeなどの動画URL" : "テキスト"}
+            />
+          )}
+          {(block.type === "image" || block.type === "video") && (
+            <input value={block.caption ?? ""} onChange={(event) => updateBlock(block.id, { caption: event.target.value })} placeholder="キャプション" />
+          )}
+        </div>
+      ))}
+      <p>太字は **このように** 入力できます。</p>
+    </div>
+  );
+}
+
 function DetailPanel({
   event,
   person,
@@ -1685,6 +1977,7 @@ function DetailPanel({
               </div>
             </div>
             <p>{renderLinkedText(event.detail, event.terms)}</p>
+            <RichContentView blocks={event.contentBlocks} />
             <div className="chips hashtag-list">
               {(event.genres ?? []).map((item) => (
                 <span key={item}>#{item}</span>
@@ -1735,15 +2028,21 @@ function DetailPanel({
                 placeholder="国を選択"
                 renderValue={(value) => getCountryName(countries, value)}
               />
-              <ChipEditor
-                label="発生地点（地図ピン・1か所）"
-                values={getRecordRegionIds(event)}
-                onChange={(values) => onUpdateEvent(event.id, { regionIds: values })}
-                options={regions.map((region) => ({ value: region.id, label: `${getCountryName(countries, region.countryId)} / ${region.name}` }))}
-                placeholder="地域を選択"
-                renderValue={(value) => getRegionName(regions, value)}
-                maxValues={1}
-              />
+              <label>
+                発生地点
+                <input
+                  value={event.locationName ?? ""}
+                  onChange={(input) =>
+                    onUpdateEvent(event.id, {
+                      locationName: input.target.value || undefined,
+                      locationLat: undefined,
+                      locationLng: undefined,
+                      regionIds: [],
+                    })
+                  }
+                  placeholder="例: サラエボ"
+                />
+              </label>
               <label>
                 簡単な概要
                 <textarea value={event.summary} onChange={(input) => onUpdateEvent(event.id, { summary: input.target.value })} />
@@ -1755,6 +2054,10 @@ function DetailPanel({
                   value={event.detail}
                   onChange={(input) => onUpdateEvent(event.id, { detail: input.target.value })}
                 />
+              </label>
+              <label>
+                詳細ページ本文
+                <RichContentEditor blocks={event.contentBlocks} onChange={(blocks) => onUpdateEvent(event.id, { contentBlocks: blocks })} />
               </label>
               <ChipEditor label="紐付ける単語" values={event.terms} onChange={(values) => onUpdateEvent(event.id, { terms: values })} placeholder="例: 第一次世界大戦" />
               <ChipEditor label="画像URL" values={event.imageUrls ?? []} onChange={(values) => onUpdateEvent(event.id, { imageUrls: values })} placeholder="画像URLを追加" />
@@ -1782,6 +2085,7 @@ function DetailPanel({
               </div>
             </div>
             <p>{renderLinkedText(person.summary, [...person.affiliations, ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])}</p>
+            <RichContentView blocks={person.contentBlocks} />
             <div className="chips hashtag-list">
               {(person.genres ?? []).map((item) => (
                 <span key={item}>#{item}</span>
@@ -1877,6 +2181,10 @@ function DetailPanel({
                   onChange={(input) => onUpdatePerson(person.id, { summary: input.target.value })}
                 />
               </label>
+              <label>
+                詳細ページ本文
+                <RichContentEditor blocks={person.contentBlocks} onChange={(blocks) => onUpdatePerson(person.id, { contentBlocks: blocks })} />
+              </label>
               <ChipEditor label="画像URL" values={person.imageUrls ?? []} onChange={(values) => onUpdatePerson(person.id, { imageUrls: values })} placeholder="画像URLを追加" />
               <ChipEditor label="参考資料" values={person.references ?? []} onChange={(values) => onUpdatePerson(person.id, { references: values })} placeholder="資料名・URLを追加" />
             </div>
@@ -1902,6 +2210,7 @@ function DetailPanel({
               </div>
             </div>
             <p>{renderLinkedText(term.detail, term.relatedTerms)}</p>
+            <RichContentView blocks={term.contentBlocks} />
             <div className="chips hashtag-list">
               {(term.genres ?? []).map((item) => (
                 <span key={item}>#{item}</span>
@@ -1949,6 +2258,10 @@ function DetailPanel({
                   value={term.detail}
                   onChange={(input) => onUpdateTerm(term.id, { detail: input.target.value })}
                 />
+              </label>
+              <label>
+                詳細ページ本文
+                <RichContentEditor blocks={term.contentBlocks} onChange={(blocks) => onUpdateTerm(term.id, { contentBlocks: blocks })} />
               </label>
               <ChipEditor label="紐付ける単語" values={term.relatedTerms} onChange={(values) => onUpdateTerm(term.id, { relatedTerms: values })} placeholder="例: ポリス" />
               <ChipEditor label="画像URL" values={term.imageUrls ?? []} onChange={(values) => onUpdateTerm(term.id, { imageUrls: values })} placeholder="画像URLを追加" />

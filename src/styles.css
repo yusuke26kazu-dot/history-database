@@ -349,7 +349,7 @@ textarea {
   height: 24px;
   width: var(--timeline-width);
   min-width: var(--timeline-width);
-  margin-left: 138px;
+  margin-left: 0;
   color: #777b82;
   font-size: 0.8rem;
 }
@@ -362,7 +362,7 @@ textarea {
 
 .timeline-grid {
   display: grid;
-  grid-template-columns: 138px var(--timeline-width);
+  grid-template-columns: var(--timeline-width);
   min-height: calc(var(--era-height) + var(--country-rows) * var(--row-height) + var(--person-row-height));
 }
 
@@ -1084,7 +1084,7 @@ textarea:focus {
 }
 
 .person-lane {
-  background: rgb(30 215 96 / 4%);
+  background: transparent;
 }
 
 .timeline-card {
@@ -1395,7 +1395,7 @@ textarea:focus {
 .timeline-scale {
   top: 0;
   height: 32px;
-  margin-left: 138px;
+  margin-left: 0;
   background: #ffffff;
   border-bottom: 1px solid #dbe3e8;
   color: #26323a;
@@ -1404,7 +1404,7 @@ textarea:focus {
 }
 
 .timeline-grid {
-  grid-template-columns: 138px var(--timeline-width);
+  grid-template-columns: var(--timeline-width);
   min-height: calc(var(--era-height) + var(--country-rows) * var(--row-height) + var(--person-row-height));
 }
 
@@ -1441,15 +1441,22 @@ textarea:focus {
 
 .lane-canvas {
   background: #ffffff;
-  background-image:
-    repeating-linear-gradient(
-      to right,
-      transparent 0,
-      transparent calc(10% - 1px),
-      rgb(31 43 50 / 16%) calc(10% - 1px),
-      rgb(31 43 50 / 16%) 10%
-    );
-  background-size: 1200px 10px;
+}
+
+.timeline-tick-lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.timeline-tick-lines span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--left);
+  width: 1px;
+  border-left: 1px dashed rgb(31 43 50 / 18%);
 }
 
 .country-lane,
@@ -1463,7 +1470,7 @@ textarea:focus {
 }
 
 .person-lane {
-  background: #ffffff;
+  background: transparent;
 }
 
 .timeline-card {
@@ -1794,6 +1801,113 @@ textarea:focus {
   line-height: 1.8;
 }
 
+.rich-content {
+  display: grid;
+  gap: 16px;
+  margin: 24px 48px 0;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #172026;
+  padding: 26px;
+}
+
+.rich-content h2,
+.rich-content h3,
+.rich-content p,
+.rich-content blockquote,
+.rich-content figure {
+  margin: 0;
+}
+
+.rich-content h2 {
+  font-size: 1.55rem;
+  line-height: 1.35;
+}
+
+.rich-content h3 {
+  font-size: 1.18rem;
+  line-height: 1.4;
+}
+
+.rich-content p,
+.rich-content blockquote {
+  line-height: 1.85;
+}
+
+.rich-content blockquote {
+  border-left: 4px solid #31b89f;
+  background: #f1faf7;
+  padding: 14px 16px;
+  color: #314049;
+}
+
+.rich-content img,
+.rich-content iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: #e8eef1;
+}
+
+.rich-content img {
+  max-height: 460px;
+  object-fit: contain;
+}
+
+.rich-content iframe {
+  aspect-ratio: 16 / 9;
+}
+
+.rich-content figcaption {
+  margin-top: 8px;
+  color: #687780;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.rich-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.rich-editor-add,
+.rich-editor-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rich-editor-add button,
+.rich-editor-row button {
+  border: 1px solid #d8e3e8;
+  border-radius: 8px;
+  background: #f8fbfc;
+  color: #24323a;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.rich-editor-block {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #dce7ec;
+  border-radius: 10px;
+  background: #fbfdfe;
+  padding: 12px;
+}
+
+.rich-editor-block textarea {
+  min-height: 96px;
+}
+
+.rich-editor > p {
+  color: #6c7a82;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .detail-preview > p {
   white-space: pre-wrap;
 }
@@ -1946,6 +2060,68 @@ textarea:focus {
   min-height: 520px;
 }
 
+.custom-map-pin {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: #25b99f;
+  color: transparent;
+  cursor: pointer;
+  box-shadow: 0 0 0 5px rgb(37 185 159 / 18%), 0 12px 24px rgb(31 49 58 / 22%);
+  transform: translate(-50%, -100%);
+}
+
+.custom-map-pin::after {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 2px;
+}
+
+.custom-map-pin::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ffffff;
+  z-index: 1;
+}
+
+.custom-map-pin:hover,
+.custom-map-pin:focus-visible {
+  background: #20313a;
+}
+
+.custom-map-pin span {
+  position: absolute;
+  left: 28px;
+  top: -8px;
+  display: none;
+  min-width: max-content;
+  max-width: 220px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 95%);
+  color: #20313a;
+  padding: 6px 8px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  box-shadow: 0 10px 26px rgb(32 49 58 / 18%);
+}
+
+.custom-map-pin:hover span,
+.custom-map-pin:focus-visible span {
+  display: block;
+}
+
 .map-api-notice {
   position: absolute;
   right: 14px;
@@ -2009,11 +2185,17 @@ textarea:focus {
 }
 
 .map-detail {
+  position: absolute;
+  right: 306px;
+  bottom: 24px;
+  z-index: 3;
   display: grid;
   gap: 10px;
+  width: min(360px, calc(100% - 340px));
   border: 1px solid #d7e2e8;
   border-radius: 8px;
-  background: #fff;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 18px 45px rgb(32 49 58 / 18%);
   padding: 16px;
 }
 
@@ -2143,6 +2325,12 @@ textarea:focus {
     grid-row: auto;
   }
 
+  .map-detail {
+    right: 18px;
+    bottom: calc(58vh + 18px);
+    width: min(360px, calc(100% - 36px));
+  }
+
   .map-frame iframe {
     min-height: 100%;
   }
@@ -2154,11 +2342,11 @@ textarea:focus {
   .timeline-scale {
     width: var(--timeline-width);
     min-width: var(--timeline-width);
-    margin-left: 86px;
+    margin-left: 0;
   }
 
   .timeline-grid {
-    grid-template-columns: 86px var(--timeline-width);
+    grid-template-columns: var(--timeline-width);
   }
 
   .lane-labels span {
@@ -2235,7 +2423,8 @@ textarea:focus {
   }
 
   .detail-preview > p,
-  .references {
+  .references,
+  .rich-content {
     margin-right: 18px;
     margin-left: 18px;
   }

@@ -8,7 +8,7 @@
     "dev:host": "vite --host 0.0.0.0",
     "build": "tsc && vite build && node scripts/inline-dist.mjs",
     "export": "npm run build && mkdir -p publish && cp dist/index.html publish/index.html",
-    "open:local": "npm run build && open dist/index.html",
+    "open:local": "npm run dev",
     "preview": "vite preview",
     "preview:host": "vite preview --host 0.0.0.0"
   },

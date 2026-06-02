@@ -128,6 +128,9 @@ export const events: Event[] = [
     relatedCountries: ["オーストリア＝ハンガリー帝国", "セルビア"],
     countryIds: ["austria-hungary", "serbia"],
     regionIds: ["sarajevo"],
+    locationName: "サラエボ",
+    locationLat: 43.8563,
+    locationLng: 18.4131,
     summary: "皇位継承者フランツ・フェルディナントがサラエボで暗殺された。",
     detail:
       "サラエボ事件は、オーストリア＝ハンガリー帝国の皇位継承者フランツ・フェルディナントがガヴリロ・プリンツィプに暗殺された出来事である。バルカン半島の緊張が、第一次世界大戦へ連鎖する契機になった。",
@@ -176,6 +179,9 @@ export const events: Event[] = [
     relatedCountries: ["ロシア帝国"],
     countryIds: ["russia"],
     regionIds: ["petrograd"],
+    locationName: "ペトログラード",
+    locationLat: 59.9311,
+    locationLng: 30.3609,
     summary: "帝政が崩壊し、臨時政府とボリシェヴィキによる権力移行が起きた。",
     detail:
       "ロシア革命は、戦争の長期化、食糧不足、政治不信を背景に帝政を崩壊させた。ニコライ2世の退位後、臨時政府とソヴィエトの二重権力を経て、ボリシェヴィキが権力を掌握した。",
@@ -202,6 +208,9 @@ export const events: Event[] = [
     relatedCountries: ["ドイツ帝国", "フランス", "イギリス", "アメリカ合衆国"],
     countryIds: ["germany", "france", "uk", "usa"],
     regionIds: ["compiegne"],
+    locationName: "コンピエーニュ",
+    locationLat: 49.4178,
+    locationLng: 2.8261,
     summary: "コンピエーニュの森で休戦協定が締結され、西部戦線の戦闘が終結した。",
     detail:
       "1918年11月11日の休戦協定により、西部戦線の戦闘は停止した。これにより第一次世界大戦の主要な戦闘は終結し、講和条約の交渉へ移った。",
@@ -215,6 +224,9 @@ export const events: Event[] = [
     relatedCountries: ["ドイツ帝国", "フランス", "イギリス", "アメリカ合衆国"],
     countryIds: ["germany", "france", "uk", "usa"],
     regionIds: ["versailles"],
+    locationName: "ヴェルサイユ",
+    locationLat: 48.8049,
+    locationLng: 2.1204,
     summary: "第一次世界大戦後の講和条約として調印された。",
     detail:
       "ヴェルサイユ条約は、第一次世界大戦後の国際秩序を定めた講和条約である。ドイツへの賠償、領土変更、国際連盟構想などが含まれ、戦後政治に長い影響を残した。",
@@ -242,6 +254,9 @@ export const events: Event[] = [
     relatedCountries: ["アテナイ", "古代ギリシア"],
     countryIds: ["ancient-greece"],
     regionIds: ["athens"],
+    locationName: "アテナイ",
+    locationLat: 37.9838,
+    locationLng: 23.7275,
     summary: "喜劇『雲』でソクラテスが知識人の風刺対象として描かれた。",
     detail:
       "アリストファネスの『雲』は、ソクラテスを詭弁的な知識人として戯画化した喜劇である。史実のソクラテス像そのものではないが、当時のアテナイ社会が知識人をどう見ていたかを考える材料になる。",
@@ -255,6 +270,9 @@ export const events: Event[] = [
     relatedCountries: ["アテナイ", "古代ギリシア"],
     countryIds: ["ancient-greece"],
     regionIds: ["athens"],
+    locationName: "アテナイ",
+    locationLat: 37.9838,
+    locationLng: 23.7275,
     summary: "ソクラテスが不敬神と青年への悪影響を問われ、死刑判決を受けた。",
     detail:
       "ソクラテス裁判では、ソクラテスが国家の認める神々を信じないこと、青年を堕落させることを理由に告発された。プラトンの『ソクラテスの弁明』は、この裁判を伝える代表的な資料である。",
