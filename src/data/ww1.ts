@@ -148,7 +148,7 @@ export const events: Event[] = [
       "アメリカ合衆国",
     ],
     countryIds: ["austria-hungary", "germany", "russia", "france", "uk", "usa"],
-    regionIds: ["vienna", "belgrade", "berlin", "petrograd", "paris", "london", "washington-dc"],
+    regionIds: [],
     summary: "同盟国と連合国を中心に展開した総力戦。",
     detail:
       "第一次世界大戦は、1914年から1918年にかけてヨーロッパを中心に展開した大規模な戦争である。サラエボ事件後の外交危機を経て、同盟関係が連鎖的に作動し、複数の帝国と国民国家が戦争に参加した。",
@@ -161,7 +161,7 @@ export const events: Event[] = [
     category: "外交",
     relatedCountries: ["オーストリア＝ハンガリー帝国", "セルビア"],
     countryIds: ["austria-hungary", "serbia"],
-    regionIds: ["vienna", "belgrade"],
+    regionIds: [],
     summary: "サラエボ事件後の最後通牒を経て、両国間の戦争が始まった。",
     detail:
       "オーストリア＝ハンガリー帝国は、サラエボ事件後にセルビアへ厳しい最後通牒を突きつけた。交渉が決裂すると宣戦布告に至り、局地的危機は第一次世界大戦へ拡大した。",
@@ -188,7 +188,7 @@ export const events: Event[] = [
     category: "戦争",
     relatedCountries: ["アメリカ合衆国", "ドイツ帝国"],
     countryIds: ["usa", "germany"],
-    regionIds: ["washington-dc", "berlin"],
+    regionIds: [],
     summary: "無制限潜水艦作戦などを背景に、アメリカがドイツへ宣戦布告した。",
     detail:
       "アメリカ合衆国の参戦は、第一次世界大戦の戦局と講和構想に大きな影響を与えた。ウッドロウ・ウィルソンは、戦後秩序の構想として十四か条を提示した。",
@@ -228,7 +228,7 @@ export const events: Event[] = [
     category: "戦争",
     relatedCountries: ["アテナイ", "スパルタ", "古代ギリシア"],
     countryIds: ["ancient-greece"],
-    regionIds: ["athens", "sparta"],
+    regionIds: [],
     summary: "アテナイを中心とするデロス同盟と、スパルタを中心とするペロポネソス同盟の戦争。",
     detail:
       "ペロポネソス戦争は、古代ギリシア世界の覇権をめぐってアテナイとスパルタが衝突した長期戦である。ソクラテスが生きた時代背景であり、アテナイの政治・社会不安にも影響を与えた。",

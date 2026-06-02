@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -42,6 +42,17 @@ type KnowledgeCard = {
 type EventMapPin = {
   item: TimelineItem;
   region: Region;
+};
+type PersistedDatabase = {
+  version: number;
+  events: Event[];
+  people: Person[];
+  termCards: TermCard[];
+  countries: Country[];
+  regions: Region[];
+  customCategories: Category[];
+  customGenres: string[];
+  savedAt?: string;
 };
 type EventPlacement = {
   item: TimelineItem;
@@ -103,6 +114,7 @@ const glossary: Record<string, string> = {
 declare global {
   interface Window {
     google?: any;
+    gm_authFailure?: () => void;
     initDariusMap?: () => void;
     dariusGoogleMapsLoading?: Promise<void>;
   }
@@ -190,6 +202,10 @@ function getPreviewImageLayout(imageUrls?: string[]) {
   return (imageUrls ?? []).length > 0 ? "has-image" : "no-image";
 }
 
+function clampTimelineZoom(value: number) {
+  return Math.min(200, Math.max(0.1, value));
+}
+
 function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
@@ -216,6 +232,50 @@ function matchesSearch(value: string, query: string) {
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}`;
+}
+
+function mergeById<T extends { id: string }>(seedItems: T[], savedItems?: T[]) {
+  const merged = new Map(seedItems.map((item) => [item.id, item]));
+  (savedItems ?? []).forEach((item) => merged.set(item.id, { ...merged.get(item.id), ...item }));
+  return Array.from(merged.values());
+}
+
+function createPersistedDatabase(data: {
+  events: Event[];
+  people: Person[];
+  termCards: TermCard[];
+  countries: Country[];
+  regions: Region[];
+  customCategories: Category[];
+  customGenres: string[];
+}): PersistedDatabase {
+  return {
+    version: 1,
+    events: data.events,
+    people: data.people,
+    termCards: data.termCards,
+    countries: data.countries,
+    regions: data.regions,
+    customCategories: data.customCategories,
+    customGenres: data.customGenres,
+  };
+}
+
+function readLocalDatabase() {
+  try {
+    const raw = window.localStorage.getItem("history-database:data");
+    return raw ? (JSON.parse(raw) as PersistedDatabase) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalDatabase(data: PersistedDatabase) {
+  try {
+    window.localStorage.setItem("history-database:data", JSON.stringify(data));
+  } catch {
+    // localStorage can be unavailable in private browsing or strict file contexts.
+  }
 }
 
 function App() {
@@ -245,6 +305,8 @@ function App() {
   const [activeRecord, setActiveRecord] = useState<EditableRecord | null>(null);
   const [termPopup, setTermPopup] = useState<TermPopup | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [hasLoadedSavedData, setHasLoadedSavedData] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("読み込み中");
 
   const timelineItems = useMemo(() => buildTimelineItems(people, events, personEvents), [people, events]);
   const categories = useMemo(
@@ -394,6 +456,82 @@ function App() {
     activeRecord?.type === "person" ? people.find((person) => person.id === activeRecord.id) ?? null : null;
   const activeTerm =
     activeRecord?.type === "term" ? termCards.find((term) => term.id === activeRecord.id) ?? null : null;
+
+  function applyPersistedDatabase(saved: PersistedDatabase) {
+    setEvents(mergeById(seedEvents, saved.events));
+    setPeople(mergeById(seedPeople, saved.people));
+    setTermCards(mergeById(seedTermCards, saved.termCards));
+    setCountries(mergeById(seedCountries, saved.countries));
+    setRegions(mergeById(seedRegions, saved.regions));
+    setCustomCategories(uniqueValues(saved.customCategories ?? []));
+    setCustomGenres(uniqueValues(saved.customGenres ?? []));
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSavedData() {
+      try {
+        const response = await fetch("/api/data", { headers: { accept: "application/json" } });
+        const remoteData = response.ok ? ((await response.json()) as PersistedDatabase | null) : null;
+        const saved = remoteData ?? readLocalDatabase();
+        if (!cancelled && saved) {
+          applyPersistedDatabase(saved);
+          setSaveStatus(remoteData ? "保存済みデータを読み込みました" : "ブラウザ内データを読み込みました");
+        }
+        if (!cancelled && !saved) {
+          setSaveStatus("初期データ");
+        }
+      } catch {
+        const localData = readLocalDatabase();
+        if (!cancelled && localData) {
+          applyPersistedDatabase(localData);
+          setSaveStatus("ブラウザ内データを読み込みました");
+        }
+        if (!cancelled && !localData) {
+          setSaveStatus("初期データ");
+        }
+      } finally {
+        if (!cancelled) setHasLoadedSavedData(true);
+      }
+    }
+
+    loadSavedData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedSavedData) return;
+    const data = createPersistedDatabase({
+      events,
+      people,
+      termCards,
+      countries,
+      regions,
+      customCategories,
+      customGenres,
+    });
+    writeLocalDatabase(data);
+    setSaveStatus("保存中");
+
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch("/api/data", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        setSaveStatus(response.ok ? "保存済み" : "ブラウザ内保存");
+      } catch {
+        setSaveStatus("ブラウザ内保存");
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timeout);
+  }, [events, people, termCards, countries, regions, customCategories, customGenres, hasLoadedSavedData]);
 
   function updateEvent(id: string, patch: Partial<Event>) {
     setEvents((current) => current.map((event) => (event.id === id ? { ...event, ...patch } : event)));
@@ -693,6 +831,7 @@ function App() {
             <div className="header-block">
               <p>歴史年表DB プロトタイプ</p>
               <h1>第一次世界大戦</h1>
+              <span className="save-status">{saveStatus}</span>
             </div>
             <div className="action-toolbar">
               <button className="mobile-filter-toggle" type="button" onClick={() => setMobileFiltersOpen((value) => !value)}>
@@ -725,11 +864,11 @@ function App() {
               >
                 時代区分
               </button>
-              <button type="button" onClick={() => setTimelineZoom((value) => Math.max(0.1, value / 1.8))}>
+              <button type="button" onClick={() => setTimelineZoom((value) => clampTimelineZoom(value / 1.8))}>
                 <ZoomOut size={15} />
               </button>
               <span className="zoom-readout">{Math.round(timelineZoom * 100)}%</span>
-              <button type="button" onClick={() => setTimelineZoom((value) => Math.min(200, value * 1.8))}>
+              <button type="button" onClick={() => setTimelineZoom((value) => clampTimelineZoom(value * 1.8))}>
                 <ZoomIn size={15} />
               </button>
               <input
@@ -738,7 +877,7 @@ function App() {
                 max="20000"
                 type="number"
                 value={Math.round(timelineZoom * 100)}
-                onChange={(event) => setTimelineZoom(Math.max(0.1, Number(event.target.value || 100) / 100))}
+                onChange={(event) => setTimelineZoom(clampTimelineZoom(Number(event.target.value || 100) / 100))}
               />
               <button type="button" onClick={() => setTimelineHeightZoom((value) => Math.max(0.8, value - 0.3))}>
                 縦-
@@ -759,6 +898,7 @@ function App() {
               laneMode={timelineLaneMode}
               countries={countries}
               eras={showEraPeriods ? seedEraPeriods : []}
+              onZoomChange={setTimelineZoom}
               onOpenRecord={openRecord}
             />
           )}
@@ -831,6 +971,7 @@ function TimelineView({
   laneMode,
   countries,
   eras,
+  onZoomChange,
   onOpenRecord,
 }: {
   items: TimelineItem[];
@@ -841,8 +982,10 @@ function TimelineView({
   laneMode: TimelineLaneMode;
   countries: Country[];
   eras: EraPeriod[];
+  onZoomChange: (updater: (value: number) => number) => void;
   onOpenRecord: (record: EditableRecord) => void;
 }) {
+  const pinchDistanceRef = useRef<number | null>(null);
   const eventYears = items.flatMap((item) => [
     toYear(item.startDate),
     item.endDate ? toYear(item.endDate) : toYear(item.startDate),
@@ -936,9 +1079,48 @@ function TimelineView({
     return eraHeight + lane * rowHeight;
   }
 
+  function zoomBy(factor: number) {
+    onZoomChange((current) => clampTimelineZoom(current * factor));
+  }
+
+  function handleTimelineWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!event.metaKey && !event.ctrlKey) return;
+    event.preventDefault();
+    zoomBy(Math.exp(-event.deltaY * 0.0012));
+  }
+
+  function getTouchDistance(event: TouchEvent<HTMLDivElement>) {
+    if (event.touches.length < 2) return null;
+    const [first, second] = [event.touches[0], event.touches[1]];
+    return Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+  }
+
+  function handleTimelineTouchStart(event: TouchEvent<HTMLDivElement>) {
+    pinchDistanceRef.current = getTouchDistance(event);
+  }
+
+  function handleTimelineTouchMove(event: TouchEvent<HTMLDivElement>) {
+    const nextDistance = getTouchDistance(event);
+    const previousDistance = pinchDistanceRef.current;
+    if (!nextDistance || !previousDistance) return;
+    event.preventDefault();
+    const factor = Math.min(1.18, Math.max(0.85, nextDistance / previousDistance));
+    zoomBy(factor);
+    pinchDistanceRef.current = nextDistance;
+  }
+
+  function handleTimelineTouchEnd() {
+    pinchDistanceRef.current = null;
+  }
+
   return (
     <div
       className="timeline-board"
+      onWheel={handleTimelineWheel}
+      onTouchStart={handleTimelineTouchStart}
+      onTouchMove={handleTimelineTouchMove}
+      onTouchEnd={handleTimelineTouchEnd}
+      onTouchCancel={handleTimelineTouchEnd}
       style={
         {
           "--timeline-width": `${Math.round(1200 * zoom)}px`,
@@ -1141,17 +1323,17 @@ function MapView({
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const [activeEventId, setActiveEventId] = useState("");
+  const [mapError, setMapError] = useState(false);
   const googleMapsApiKey = String((import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
   const eventPins = useMemo<EventMapPin[]>(
     () =>
-      items.flatMap((item) =>
-        getRecordRegionIds(item)
-          .map((regionId) => {
-            const region = regions.find((candidate) => candidate.id === regionId);
-            return region ? { item, region } : undefined;
-          })
-          .filter((pin): pin is EventMapPin => Boolean(pin)),
-      ),
+      items
+        .map((item) => {
+          const regionId = getRecordRegionIds(item)[0];
+          const region = regionId ? regions.find((candidate) => candidate.id === regionId) : undefined;
+          return region ? { item, region } : undefined;
+        })
+        .filter((pin): pin is EventMapPin => Boolean(pin)),
     [items, regions],
   );
   const activeEventPin = eventPins.find((pin) => pin.item.id === activeEventId) ?? eventPins[0];
@@ -1159,6 +1341,8 @@ function MapView({
   useEffect(() => {
     if (!googleMapsApiKey || !mapElementRef.current || eventPins.length === 0) return;
     let cancelled = false;
+    setMapError(false);
+    window.gm_authFailure = () => setMapError(true);
 
     loadGoogleMaps(googleMapsApiKey).then(() => {
       if (cancelled || !mapElementRef.current || !window.google?.maps) return;
@@ -1201,6 +1385,8 @@ function MapView({
       } else {
         map.fitBounds(bounds, 64);
       }
+    }).catch(() => {
+      if (!cancelled) setMapError(true);
     });
 
     return () => {
@@ -1215,13 +1401,15 @@ function MapView({
   return (
     <div className="map-board">
       <section className="map-frame">
-        {googleMapsApiKey ? (
+        {googleMapsApiKey && !mapError ? (
           <div className="google-map-canvas" ref={mapElementRef} />
         ) : (
           <>
             <iframe title="Googleマップ" src={fallbackMapUrl} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
             <div className="map-api-notice">
-              Google Maps APIキーを設定すると、ズームに追従する常設ピンが表示されます。
+              {mapError
+                ? "Google Maps APIキーの許可元設定を確認してください。ローカルは http://localhost:5173/ で開くと安定します。"
+                : "Google Maps APIキーを設定すると、ズームに追従する常設ピンが表示されます。"}
             </div>
           </>
         )}
@@ -1308,6 +1496,7 @@ function ChipEditor({
   options,
   placeholder,
   renderValue,
+  maxValues,
 }: {
   label: string;
   values: string[];
@@ -1315,6 +1504,7 @@ function ChipEditor({
   options?: Array<{ value: string; label: string }>;
   placeholder?: string;
   renderValue?: (value: string) => string;
+  maxValues?: number;
 }) {
   const [draft, setDraft] = useState("");
   const optionLabels = new Map((options ?? []).map((option) => [option.label, option.value]));
@@ -1326,7 +1516,8 @@ function ChipEditor({
     if (!trimmed) return;
     const next = optionLabels.get(trimmed) ?? trimmed;
     if (options && !optionValues.has(next)) return;
-    onChange(uniqueValues([...values, next]));
+    const nextValues = uniqueValues([...values, next]);
+    onChange(maxValues === 1 ? [next] : nextValues.slice(0, maxValues ?? nextValues.length));
     setDraft("");
   }
 
@@ -1373,6 +1564,40 @@ function ChipEditor({
   );
 }
 
+function DetailHeroImage({
+  imageUrls,
+  title,
+  onOrientationChange,
+}: {
+  imageUrls?: string[];
+  title: string;
+  onOrientationChange: (orientation: "landscape" | "portrait") => void;
+}) {
+  const [orientation, setOrientation] = useState<"landscape" | "portrait">("landscape");
+  const firstImage = imageUrls?.[0];
+
+  if (!firstImage) {
+    return <div className="image-placeholder">{title.slice(0, 1)}</div>;
+  }
+
+  return (
+    <>
+      <img className="hero-blur" alt="" src={firstImage} />
+      <img
+        className={`hero-image ${orientation}`}
+        alt={title}
+        src={firstImage}
+        onLoad={(event) => {
+          const image = event.currentTarget;
+          const nextOrientation = image.naturalHeight > image.naturalWidth ? "portrait" : "landscape";
+          setOrientation(nextOrientation);
+          onOrientationChange(nextOrientation);
+        }}
+      />
+    </>
+  );
+}
+
 function DetailPanel({
   event,
   person,
@@ -1410,6 +1635,8 @@ function DetailPanel({
   renderLinkedText: (text: string, terms: string[]) => ReactNode;
   termPopup: TermPopup | null;
 }) {
+  const [heroOrientation, setHeroOrientation] = useState<"landscape" | "portrait">("landscape");
+
   return (
     <aside className="detail-panel" aria-label="詳細編集">
       <div className="detail-toolbar">
@@ -1442,15 +1669,8 @@ function DetailPanel({
       {event && (
         <div className="detail-stack">
           <section className="detail-preview primary">
-            <div className={`preview-images ${getPreviewImageLayout(event.imageUrls)}`}>
-              {(event.imageUrls ?? []).length > 0 ? (
-                <>
-                  <img className="hero-blur" alt="" src={event.imageUrls![0]} />
-                  <img className="hero-image" alt={event.title} src={event.imageUrls![0]} />
-                </>
-              ) : (
-                <div className="image-placeholder">{event.title.slice(0, 1)}</div>
-              )}
+            <div className={`preview-images ${getPreviewImageLayout(event.imageUrls)} ${heroOrientation === "portrait" ? "portrait-image" : ""}`}>
+              <DetailHeroImage imageUrls={event.imageUrls} title={event.title} onOrientationChange={setHeroOrientation} />
               <div className="detail-hero-copy">
                 <span className="knowledge-label hero-kicker">
                   <span className="hero-kicker-dot" />
@@ -1516,12 +1736,13 @@ function DetailPanel({
                 renderValue={(value) => getCountryName(countries, value)}
               />
               <ChipEditor
-                label="地域・ピン"
+                label="発生地点（地図ピン・1か所）"
                 values={getRecordRegionIds(event)}
                 onChange={(values) => onUpdateEvent(event.id, { regionIds: values })}
                 options={regions.map((region) => ({ value: region.id, label: `${getCountryName(countries, region.countryId)} / ${region.name}` }))}
                 placeholder="地域を選択"
                 renderValue={(value) => getRegionName(regions, value)}
+                maxValues={1}
               />
               <label>
                 簡単な概要
@@ -1546,15 +1767,8 @@ function DetailPanel({
       {person && (
         <div className="detail-stack">
           <section className="detail-preview primary">
-            <div className={`preview-images ${getPreviewImageLayout(person.imageUrls)}`}>
-              {(person.imageUrls ?? []).length > 0 ? (
-                <>
-                  <img className="hero-blur" alt="" src={person.imageUrls![0]} />
-                  <img className="hero-image" alt={person.name} src={person.imageUrls![0]} />
-                </>
-              ) : (
-                <div className="image-placeholder">{person.name.slice(0, 1)}</div>
-              )}
+            <div className={`preview-images ${getPreviewImageLayout(person.imageUrls)} ${heroOrientation === "portrait" ? "portrait-image" : ""}`}>
+              <DetailHeroImage imageUrls={person.imageUrls} title={person.name} onOrientationChange={setHeroOrientation} />
               <div className="detail-hero-copy">
                 <span className="knowledge-label hero-kicker person">
                   <span className="hero-kicker-dot" />
@@ -1673,15 +1887,8 @@ function DetailPanel({
       {term && (
         <div className="detail-stack">
           <section className="detail-preview primary">
-            <div className={`preview-images ${getPreviewImageLayout(term.imageUrls)}`}>
-              {(term.imageUrls ?? []).length > 0 ? (
-                <>
-                  <img className="hero-blur" alt="" src={term.imageUrls![0]} />
-                  <img className="hero-image" alt={term.term} src={term.imageUrls![0]} />
-                </>
-              ) : (
-                <div className="image-placeholder">{term.term.slice(0, 1)}</div>
-              )}
+            <div className={`preview-images ${getPreviewImageLayout(term.imageUrls)} ${heroOrientation === "portrait" ? "portrait-image" : ""}`}>
+              <DetailHeroImage imageUrls={term.imageUrls} title={term.term} onOrientationChange={setHeroOrientation} />
               <div className="detail-hero-copy">
                 <span className="knowledge-label hero-kicker term">
                   <span className="hero-kicker-dot" />
