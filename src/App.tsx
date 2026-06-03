@@ -182,8 +182,12 @@ function toPersonLifeLabel(person: Person) {
   return `${toPersonDateLabel(person.birthDate, person.birthYear)}-${toPersonDateLabel(person.deathDate, person.deathYear)}`;
 }
 
+function getTimelinePixelWidth(yearSpan: number, zoom: number) {
+  return Math.max(1800, yearSpan * 4) * zoom;
+}
+
 function getYearTickStep(zoom: number, yearSpan: number) {
-  const timelineWidth = 1200 * zoom;
+  const timelineWidth = getTimelinePixelWidth(yearSpan, zoom);
   const pixelsPerYear = timelineWidth / Math.max(yearSpan, 1);
   const targetLabelGap = 86;
   const minimumYearsPerTick = targetLabelGap / Math.max(pixelsPerYear, 0.01);
@@ -1121,6 +1125,7 @@ function TimelineView({
   const minYear = Math.floor(Math.min(...eventYears, ...personYears) / 10) * 10;
   const maxYear = Math.ceil(Math.max(...eventYears, ...personYears) / 10) * 10;
   const span = maxYear - minYear || 1;
+  const timelinePixelWidth = getTimelinePixelWidth(span, zoom);
   const tickStep = getYearTickStep(zoom, span);
   const firstTick = Math.ceil(minYear / tickStep) * tickStep;
   const yearTicks = Array.from(
@@ -1177,7 +1182,7 @@ function TimelineView({
       .sort((a, b) => a.lane - b.lane || a.left - b.left)
       .forEach((placement) => {
         const stacks = stacksByLane.get(placement.lane) ?? [];
-        const visualWidth = Math.max(placement.visualWidth, Math.min(18, 1400 / Math.max(1200 * zoom, 1)));
+        const visualWidth = Math.max(placement.visualWidth, Math.min(18, 1400 / Math.max(timelinePixelWidth, 1)));
         const stack = stacks.findIndex((end) => placement.left > end + 0.25);
         const nextStack = stack === -1 ? stacks.length : stack;
         placement.stack = nextStack;
@@ -1259,7 +1264,7 @@ function TimelineView({
       onTouchCancel={handleTimelineTouchEnd}
       style={
         {
-          "--timeline-width": `${Math.round(1200 * zoom)}px`,
+          "--timeline-width": `${Math.round(timelinePixelWidth)}px`,
           "--row-height": `${rowHeight}px`,
           "--person-row-height": `${personRowHeight}px`,
           "--era-height": `${eraHeight}px`,
