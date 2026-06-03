@@ -1388,7 +1388,9 @@ textarea:focus {
   background: #ffffff;
   box-shadow: none;
   padding: 0;
+  overflow: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   touch-action: pan-x pan-y;
 }
 

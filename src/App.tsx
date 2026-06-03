@@ -46,6 +46,10 @@ type EventMapPin = {
   longitude: number;
   countryId: string | undefined;
 };
+type MapPoint = {
+  latitude: number;
+  longitude: number;
+};
 type PersistedDatabase = {
   version: number;
   events: Event[];
@@ -231,6 +235,50 @@ function getRecordRegionIds(record: Event | Person) {
 
 function hasCoordinates(record: Event) {
   return typeof record.locationLat === "number" && typeof record.locationLng === "number";
+}
+
+function normalizeLocationName(value: string) {
+  return value
+    .toLocaleLowerCase("ja")
+    .replace(/[・＝=()\[\]（）\s、,.-]/g, "");
+}
+
+const representativeLocations: Array<{ keywords: string[]; point: MapPoint }> = [
+  { keywords: ["サラエボ", "ボスニア"], point: { latitude: 43.8563, longitude: 18.4131 } },
+  { keywords: ["バルカン", "バルカン半島"], point: { latitude: 42.7, longitude: 21.0 } },
+  { keywords: ["ペトログラード", "サンクトペテルブルク"], point: { latitude: 59.9311, longitude: 30.3609 } },
+  { keywords: ["コンピエーニュ"], point: { latitude: 49.4178, longitude: 2.8261 } },
+  { keywords: ["ヴェルサイユ"], point: { latitude: 48.8049, longitude: 2.1204 } },
+  { keywords: ["アテナイ", "アテネ", "古代ギリシア", "ギリシア"], point: { latitude: 37.9838, longitude: 23.7275 } },
+  { keywords: ["スパルタ"], point: { latitude: 37.0745, longitude: 22.4301 } },
+  { keywords: ["日本", "東京", "江戸"], point: { latitude: 35.6762, longitude: 139.6503 } },
+  { keywords: ["奈良", "平城京"], point: { latitude: 34.6851, longitude: 135.8048 } },
+  { keywords: ["平安", "平安京", "京都"], point: { latitude: 35.0116, longitude: 135.7681 } },
+  { keywords: ["鎌倉"], point: { latitude: 35.3192, longitude: 139.5467 } },
+  { keywords: ["中国", "中華", "唐", "隋", "秦", "漢", "長安", "西安"], point: { latitude: 34.3416, longitude: 108.9398 } },
+  { keywords: ["北京", "元", "明", "清"], point: { latitude: 39.9042, longitude: 116.4074 } },
+  { keywords: ["洛陽", "後漢", "東周"], point: { latitude: 34.6197, longitude: 112.454 } },
+  { keywords: ["南京"], point: { latitude: 32.0603, longitude: 118.7969 } },
+  { keywords: ["ヨーロッパ", "欧州"], point: { latitude: 50.8503, longitude: 4.3517 } },
+  { keywords: ["フランス", "パリ"], point: { latitude: 48.8566, longitude: 2.3522 } },
+  { keywords: ["ドイツ", "ベルリン"], point: { latitude: 52.52, longitude: 13.405 } },
+  { keywords: ["イギリス", "英国", "ロンドン"], point: { latitude: 51.5072, longitude: -0.1276 } },
+  { keywords: ["アメリカ", "ワシントン"], point: { latitude: 38.9072, longitude: -77.0369 } },
+  { keywords: ["ロシア", "モスクワ"], point: { latitude: 55.7558, longitude: 37.6173 } },
+];
+
+function getRepresentativeLocation(locationName: string, regions: Region[], countryNames: string[]) {
+  const normalizedLocation = normalizeLocationName(locationName);
+  const region = regions.find((candidate) => {
+    const normalizedRegion = normalizeLocationName(candidate.name);
+    return normalizedLocation === normalizedRegion || normalizedLocation.includes(normalizedRegion) || normalizedRegion.includes(normalizedLocation);
+  });
+  if (region) return { latitude: region.latitude, longitude: region.longitude };
+
+  const searchText = normalizeLocationName([locationName, ...countryNames].join(" "));
+  return representativeLocations.find((location) =>
+    location.keywords.some((keyword) => searchText.includes(normalizeLocationName(keyword))),
+  )?.point;
 }
 
 function matchesSearch(value: string, query: string) {
@@ -1408,13 +1456,15 @@ function MapView({
       .map((item): EventMapPin | undefined => {
         const locationName = item.locationName?.trim();
         if (!locationName) return undefined;
+        const countryId = getRecordCountryIds(item)[0];
+        const countryNames = getRecordCountryIds(item).map((id) => getCountryName(countries, id));
         if (locationName && hasCoordinates(item)) {
           return {
             item,
             locationName,
             latitude: item.locationLat as number,
             longitude: item.locationLng as number,
-            countryId: getRecordCountryIds(item)[0],
+            countryId,
           };
         }
 
@@ -1425,13 +1475,23 @@ function MapView({
             locationName,
             latitude: geocoded.latitude,
             longitude: geocoded.longitude,
-            countryId: getRecordCountryIds(item)[0],
+            countryId,
+          };
+        }
+        const representativeLocation = getRepresentativeLocation(locationName, regions, countryNames);
+        if (representativeLocation) {
+          return {
+            item,
+            locationName,
+            latitude: representativeLocation.latitude,
+            longitude: representativeLocation.longitude,
+            countryId,
           };
         }
         return undefined;
       })
       .filter((pin): pin is EventMapPin => Boolean(pin));
-  }, [geocodedLocations, items]);
+  }, [countries, geocodedLocations, items, regions]);
   const focusedEventPin = eventPins.find((pin) => pin.item.id === focusedEventId);
   const previewEventPin = eventPins.find((pin) => pin.item.id === previewEventId);
 
@@ -1461,8 +1521,16 @@ function MapView({
           pendingItems.forEach((item) => {
             const address = item.locationName?.trim();
             if (!address) return;
-            geocoder.geocode({ address }, (results: any[], status: string) => {
-              if (cancelled || status !== "OK" || !results?.[0]?.geometry?.location) return;
+            const countryNames = getRecordCountryIds(item).map((id) => getCountryName(countries, id));
+            const representativeLocation = getRepresentativeLocation(address, regions, countryNames);
+            geocoder.geocode({ address: [address, ...countryNames].join(" "), region: "JP" }, (results: any[], status: string) => {
+              if (cancelled) return;
+              if (status !== "OK" || !results?.[0]?.geometry?.location) {
+                if (representativeLocation) {
+                  setGeocodedLocations((current) => ({ ...current, [item.id]: representativeLocation }));
+                }
+                return;
+              }
               const location = results[0].geometry.location;
               const nextLocation = {
                 latitude: location.lat(),
@@ -1486,7 +1554,7 @@ function MapView({
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [geocodedLocations, googleMapsApiKey, isFileProtocol, items, onUpdateEvent]);
+  }, [countries, geocodedLocations, googleMapsApiKey, isFileProtocol, items, onUpdateEvent, regions]);
 
   useEffect(() => {
     if (!googleMapsApiKey || isFileProtocol || !mapElementRef.current || eventPins.length === 0) return;
@@ -1536,6 +1604,10 @@ function MapView({
             stopMapEvent(event);
             setFocusedEventId(pin.item.id);
             setPreviewEventId(pin.item.id);
+          });
+          element.addEventListener("dblclick", (event) => {
+            stopMapEvent(event);
+            onOpenRecord({ type: "event", id: pin.item.id });
           });
           overlay.getPanes()?.overlayMouseTarget.appendChild(element);
         };
