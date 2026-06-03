@@ -821,6 +821,9 @@ function App() {
                   key={view.id}
                   onClick={() => {
                     setViewMode(view.id);
+                    setActiveRecord(null);
+                    setTermPopup(null);
+                    setDetailEditMode(false);
                     setMobileFiltersOpen(false);
                   }}
                   type="button"
