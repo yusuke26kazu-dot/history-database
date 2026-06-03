@@ -1509,6 +1509,8 @@ function MapView({
         });
       googleMapRef.current = map;
       const bounds = new maps.LatLngBounds();
+      mapInfoWindowRef.current?.close?.();
+      mapInfoWindowRef.current = null;
 
       mapMarkersRef.current.forEach((overlay) => overlay.setMap(null));
       mapMarkersRef.current = [];
@@ -1521,10 +1523,18 @@ function MapView({
           element = document.createElement("button");
           element.type = "button";
           element.className = "custom-map-pin";
-          element.title = pin.item.title;
           element.setAttribute("aria-label", pin.item.title);
           element.innerHTML = `<span>${escapeHtml(pin.item.title)}</span>`;
-          element.addEventListener("click", () => {
+          const stopMapEvent = (event: globalThis.MouseEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+          };
+          element.addEventListener("mouseenter", stopMapEvent);
+          element.addEventListener("mouseover", stopMapEvent);
+          element.addEventListener("mousemove", stopMapEvent);
+          element.addEventListener("mousedown", stopMapEvent);
+          element.addEventListener("click", (event) => {
+            stopMapEvent(event);
             setFocusedEventId(pin.item.id);
             setPreviewEventId(pin.item.id);
           });
