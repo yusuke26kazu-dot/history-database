@@ -815,10 +815,93 @@ textarea {
   gap: 14px;
 }
 
+.delete-card-button {
+  border: 1px solid #f2b8b5;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #b42318;
+  padding: 11px 14px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.delete-card-button:hover {
+  background: #fee4e2;
+  border-color: #f97066;
+}
+
 .date-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.historical-date-input {
+  display: grid;
+  gap: 8px;
+}
+
+.historical-date-input > span {
+  font-size: 0.72rem;
+  font-weight: 850;
+  color: #22313a;
+}
+
+.date-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.date-search-row button,
+.date-picker-controls button,
+.date-day-grid button {
+  border: 1px solid #d3dfe5;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #22313a;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.date-search-row button {
+  padding: 0 10px;
+}
+
+.date-picker-controls {
+  display: grid;
+  grid-template-columns: auto minmax(96px, 1fr) auto minmax(82px, 0.8fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.date-picker-controls strong {
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d3dfe5;
+  border-radius: 7px;
+  background: #f7fafb;
+  color: #172026;
+  font-size: 0.86rem;
+}
+
+.date-day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.date-day-grid button {
+  min-height: 30px;
+  padding: 0;
+  font-size: 0.78rem;
+}
+
+.date-day-grid button.active {
+  border-color: #18b89d;
+  background: #dcfbf3;
+  color: #076b5d;
 }
 
 .detail-preview {
@@ -1416,7 +1499,7 @@ textarea:focus {
   width: var(--timeline-width);
   min-width: var(--timeline-width);
   grid-template-columns: var(--timeline-width);
-  min-height: calc(var(--era-height) + var(--country-rows) * var(--row-height) + var(--person-row-height));
+  min-height: calc(var(--era-height) + var(--country-rows) * var(--row-height) + var(--person-row-height) + 46px);
 }
 
 .lane-labels {
@@ -1550,6 +1633,28 @@ textarea:focus {
   width: var(--width);
   min-width: 0;
   white-space: nowrap;
+}
+
+.timeline-scroll-control {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  z-index: 60;
+  display: grid;
+  align-items: center;
+  width: calc(100vw - 200px);
+  max-width: 100%;
+  min-width: 260px;
+  height: 42px;
+  border-top: 1px solid #dbe3e8;
+  background: rgb(255 255 255 / 96%);
+  padding: 8px 16px;
+  box-shadow: 0 -10px 24px rgb(32 47 56 / 8%);
+}
+
+.timeline-scroll-control input {
+  width: 100%;
+  accent-color: #26323a;
 }
 
 .hover-summary {
@@ -2451,6 +2556,18 @@ textarea:focus {
 
   .detail-panel {
     width: 100vw;
+  }
+
+  .date-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .date-picker-controls {
+    grid-template-columns: auto minmax(88px, 1fr) auto;
+  }
+
+  .date-picker-controls select {
+    grid-column: 1 / -1;
   }
 
   .detail-hero-copy {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -151,18 +151,45 @@ const formatDate = new Intl.DateTimeFormat("ja-JP", {
 });
 
 function toLabelDate(value: string) {
+  const parts = parseHistoricalDateParts(value);
   const year = getHistoricalYear(value);
-  if (year < 1) {
-    return `紀元前${Math.abs(year) + 1}年`;
+  if (!String(value ?? "").trim() || !Number.isFinite(year)) {
+    return "未設定";
   }
-  return formatDate.format(new Date(`${value}T00:00:00`));
+  if (parts && parts.year < 1) {
+    return `紀元前${Math.abs(parts.year) + 1}年${parts.month}月${parts.day}日`;
+  }
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return parts ? `${parts.year}年${parts.month}月${parts.day}日` : String(year);
+  }
+  return formatDate.format(date);
 }
 
 function toYear(value: string) {
   return getHistoricalYear(value);
 }
 
+function getTimelineYearPosition(value: string) {
+  const match = String(value ?? "").trim().match(/^(-?\d{1,6})(?:-(\d{2}))?(?:-(\d{2}))?/);
+  if (!match) return toYear(value);
+  const year = Number(match[1]);
+  const month = match[2] ? Math.min(12, Math.max(1, Number(match[2]))) : 1;
+  const day = match[3] ? Math.min(31, Math.max(1, Number(match[3]))) : 1;
+  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const daysBeforeMonth = daysInMonth.slice(0, month - 1).reduce((sum, days) => sum + days, 0);
+  const dayOfYear = Math.min(daysBeforeMonth + day - 1, daysInMonth.reduce((sum, days) => sum + days, 0) - 1);
+  return year + dayOfYear / daysInMonth.reduce((sum, days) => sum + days, 0);
+}
+
+function isLeapYear(year: number) {
+  if (year % 400 === 0) return true;
+  if (year % 100 === 0) return false;
+  return year % 4 === 0;
+}
+
 function toDisplayYear(year: number) {
+  if (!Number.isFinite(year)) return "未設定";
   return year < 1 ? `前${Math.abs(year) + 1}` : String(year);
 }
 
@@ -174,7 +201,12 @@ function getPersonDeathDate(person: Person) {
   return person.deathDate ?? `${person.deathYear}-12-31`;
 }
 
+function getPersonDeathTimelineDate(person: Person) {
+  return person.deathDate ?? `${person.deathYear}-01-01`;
+}
+
 function toPersonDateLabel(date: string | undefined, year: number) {
+  if (!date && year === 0) return "未設定";
   return date ? toLabelDate(date) : toDisplayYear(year);
 }
 
@@ -221,6 +253,67 @@ function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+type HistoricalDateParts = {
+  year: number;
+  month: number;
+  day: number;
+};
+
+function padDatePart(value: number, length = 2) {
+  return String(Math.abs(value)).padStart(length, "0");
+}
+
+function serializeHistoricalDate({ year, month, day }: HistoricalDateParts) {
+  const yearPrefix = year < 0 ? "-" : "";
+  return `${yearPrefix}${padDatePart(year, 4)}-${padDatePart(month)}-${padDatePart(day)}`;
+}
+
+function parseHistoricalDateParts(value: string | undefined): HistoricalDateParts | null {
+  const safeValue = String(value ?? "").trim();
+  if (!safeValue) return null;
+  const normalized = safeValue
+    .replace(/紀元前/g, "前")
+    .replace(/[年月/.]/g, "-")
+    .replace(/日/g, "")
+    .replace(/\s+/g, "");
+  const beforeCommonEraMatch = normalized.match(/^前(\d{1,6})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/);
+  if (beforeCommonEraMatch) {
+    return {
+      year: -(Number(beforeCommonEraMatch[1]) - 1),
+      month: beforeCommonEraMatch[2] ? Number(beforeCommonEraMatch[2]) : 1,
+      day: beforeCommonEraMatch[3] ? Number(beforeCommonEraMatch[3]) : 1,
+    };
+  }
+  const match = normalized.match(/^(-?\d{1,6})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: match[2] ? Number(match[2]) : 1,
+    day: match[3] ? Number(match[3]) : 1,
+  };
+}
+
+function clampHistoricalDateParts(parts: HistoricalDateParts): HistoricalDateParts {
+  const month = Math.min(12, Math.max(1, parts.month));
+  const daysInMonth = getDaysInHistoricalMonth(parts.year, month);
+  return {
+    year: Number.isFinite(parts.year) ? Math.trunc(parts.year) : 0,
+    month,
+    day: Math.min(daysInMonth, Math.max(1, parts.day)),
+  };
+}
+
+function getDaysInHistoricalMonth(year: number, month: number) {
+  return [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 31;
+}
+
+function formatHistoricalDateSearch(value: string | undefined) {
+  const parts = parseHistoricalDateParts(value);
+  if (!parts) return "";
+  const displayYear = parts.year < 1 ? `前${Math.abs(parts.year) + 1}` : String(parts.year);
+  return `${displayYear}-${padDatePart(parts.month)}-${padDatePart(parts.day)}`;
+}
+
 function getCountryName(countries: Country[], id: string) {
   return countries.find((country) => country.id === id)?.name ?? id;
 }
@@ -253,8 +346,13 @@ const representativeLocations: Array<{ keywords: string[]; point: MapPoint }> = 
   { keywords: ["ペトログラード", "サンクトペテルブルク"], point: { latitude: 59.9311, longitude: 30.3609 } },
   { keywords: ["コンピエーニュ"], point: { latitude: 49.4178, longitude: 2.8261 } },
   { keywords: ["ヴェルサイユ"], point: { latitude: 48.8049, longitude: 2.1204 } },
-  { keywords: ["アテナイ", "アテネ", "古代ギリシア", "ギリシア"], point: { latitude: 37.9838, longitude: 23.7275 } },
+  { keywords: ["アテナイ", "アテネ", "古代ギリシア", "ギリシア", "ギリシャ"], point: { latitude: 37.9838, longitude: 23.7275 } },
   { keywords: ["スパルタ"], point: { latitude: 37.0745, longitude: 22.4301 } },
+  { keywords: ["ペロポネソス", "ペロポネソス半島"], point: { latitude: 37.35, longitude: 22.35 } },
+  { keywords: ["アッティカ"], point: { latitude: 37.9838, longitude: 23.7275 } },
+  { keywords: ["イオニア", "小アジア", "アナトリア"], point: { latitude: 38.42, longitude: 27.14 } },
+  { keywords: ["地中海"], point: { latitude: 36.2, longitude: 18.0 } },
+  { keywords: ["エーゲ海"], point: { latitude: 38.5, longitude: 25.0 } },
   { keywords: ["日本", "東京", "江戸"], point: { latitude: 35.6762, longitude: 139.6503 } },
   { keywords: ["奈良", "平城京"], point: { latitude: 34.6851, longitude: 135.8048 } },
   { keywords: ["平安", "平安京", "京都"], point: { latitude: 35.0116, longitude: 135.7681 } },
@@ -269,9 +367,19 @@ const representativeLocations: Array<{ keywords: string[]; point: MapPoint }> = 
   { keywords: ["イギリス", "英国", "ロンドン"], point: { latitude: 51.5072, longitude: -0.1276 } },
   { keywords: ["アメリカ", "ワシントン"], point: { latitude: 38.9072, longitude: -77.0369 } },
   { keywords: ["ロシア", "モスクワ"], point: { latitude: 55.7558, longitude: 37.6173 } },
+  { keywords: ["セルビア", "ベオグラード"], point: { latitude: 44.7866, longitude: 20.4489 } },
+  { keywords: ["オーストリア", "ハンガリー", "オーストリアハンガリー", "ウィーン"], point: { latitude: 48.2082, longitude: 16.3738 } },
 ];
 
-function getRepresentativeLocation(locationName: string, regions: Region[], countryNames: string[]) {
+function averageRegionPoint(regions: Region[]) {
+  if (regions.length === 0) return undefined;
+  return {
+    latitude: regions.reduce((sum, region) => sum + region.latitude, 0) / regions.length,
+    longitude: regions.reduce((sum, region) => sum + region.longitude, 0) / regions.length,
+  };
+}
+
+function getRepresentativeLocation(locationName: string, regions: Region[], countryNames: string[], countryIds: string[] = []) {
   const normalizedLocation = normalizeLocationName(locationName);
   const region = regions.find((candidate) => {
     const normalizedRegion = normalizeLocationName(candidate.name);
@@ -280,9 +388,38 @@ function getRepresentativeLocation(locationName: string, regions: Region[], coun
   if (region) return { latitude: region.latitude, longitude: region.longitude };
 
   const searchText = normalizeLocationName([locationName, ...countryNames].join(" "));
-  return representativeLocations.find((location) =>
+  const dictionaryPoint = representativeLocations.find((location) =>
     location.keywords.some((keyword) => searchText.includes(normalizeLocationName(keyword))),
   )?.point;
+  if (dictionaryPoint) return dictionaryPoint;
+
+  const countryRegions = regions.filter((region) => countryIds.includes(region.countryId));
+  return averageRegionPoint(countryRegions);
+}
+
+function getLocationSearchAliases(locationName: string) {
+  const normalizedLocation = normalizeLocationName(locationName);
+  const aliases: string[] = [];
+  if (normalizedLocation.includes("ペロポネソス")) aliases.push("Peloponnese Greece");
+  if (normalizedLocation.includes("アテナイ") || normalizedLocation.includes("アテネ")) aliases.push("Athens Greece");
+  if (normalizedLocation.includes("スパルタ")) aliases.push("Sparta Greece");
+  if (normalizedLocation.includes("小アジア") || normalizedLocation.includes("アナトリア")) aliases.push("Anatolia Turkey");
+  if (normalizedLocation.includes("イオニア")) aliases.push("Ionia Turkey");
+  if (normalizedLocation.includes("エーゲ海")) aliases.push("Aegean Sea");
+  if (normalizedLocation.includes("地中海")) aliases.push("Mediterranean Sea");
+  return aliases;
+}
+
+function buildLocationQueries(locationName: string, countryNames: string[], countryIds: string[]) {
+  const countryHints = [
+    ...countryNames,
+    ...(countryIds.includes("ancient-greece") ? ["Greece", "ギリシャ"] : []),
+  ];
+  return uniqueValues([
+    locationName,
+    ...getLocationSearchAliases(locationName),
+    ...countryHints.map((countryName) => `${locationName} ${countryName}`),
+  ]);
 }
 
 function matchesSearch(value: string, query: string) {
@@ -659,6 +796,30 @@ function App() {
     setTermCards((current) => current.map((term) => (term.id === id ? { ...term, ...patch } : term)));
   }
 
+  function deleteEvent(id: string) {
+    if (!window.confirm("本当にこの出来事を削除しますか？")) return;
+    setEvents((current) => current.filter((event) => event.id !== id));
+    setActiveRecord(null);
+    setTermPopup(null);
+    setDetailEditMode(false);
+  }
+
+  function deletePerson(id: string) {
+    if (!window.confirm("本当にこの人物を削除しますか？")) return;
+    setPeople((current) => current.filter((person) => person.id !== id));
+    setActiveRecord(null);
+    setTermPopup(null);
+    setDetailEditMode(false);
+  }
+
+  function deleteTermCard(id: string) {
+    if (!window.confirm("本当にこの単語カードを削除しますか？")) return;
+    setTermCards((current) => current.filter((term) => term.id !== id));
+    setActiveRecord(null);
+    setTermPopup(null);
+    setDetailEditMode(false);
+  }
+
   function openRecord(record: EditableRecord) {
     setActiveRecord(record);
     setDetailEditMode(false);
@@ -766,6 +927,23 @@ function App() {
     setCountries((current) => [...current, { id, name }]);
     setNewCountryName("");
     setNewRegionCountryId(id);
+  }
+
+  function resolveCountryInput(value: string) {
+    const name = value.trim();
+    if (!name) return undefined;
+    const normalizedName = normalizeLocationName(name);
+    const existing = countries.find(
+      (candidate) => candidate.id === name || normalizeLocationName(candidate.name) === normalizedName,
+    );
+    if (existing) return existing.id;
+    const id = makeId("country");
+    setCountries((current) => {
+      const duplicate = current.find((candidate) => normalizeLocationName(candidate.name) === normalizedName);
+      return duplicate ? current : [...current, { id, name }];
+    });
+    setNewRegionCountryId(id);
+    return id;
   }
 
   function addRegion() {
@@ -1066,6 +1244,10 @@ function App() {
             onUpdateEvent={updateEvent}
             onUpdatePerson={updatePerson}
             onUpdateTerm={updateTermCard}
+            onDeleteEvent={deleteEvent}
+            onDeletePerson={deletePerson}
+            onDeleteTerm={deleteTermCard}
+            onResolveCountry={resolveCountryInput}
             renderLinkedText={renderLinkedText}
             termPopup={termPopup}
           />
@@ -1107,23 +1289,19 @@ function TimelineView({
   onOpenRecord: (record: EditableRecord) => void;
 }) {
   const pinchDistanceRef = useRef<number | null>(null);
+  const pendingTimelineAnchorRef = useRef<{ ratio: number; viewportX: number } | null>(null);
+  const timelineBoardRef = useRef<HTMLDivElement | null>(null);
+  const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
+  const [timelineScrollMax, setTimelineScrollMax] = useState(0);
   const eventYears = items.flatMap((item) => [
-    toYear(item.startDate),
-    item.endDate ? toYear(item.endDate) : toYear(item.startDate),
+    getTimelineYearPosition(item.startDate),
+    item.endDate ? getTimelineYearPosition(item.endDate) : getTimelineYearPosition(item.startDate),
   ]);
-  const personYears = people.flatMap((person) => [toYear(getPersonBirthDate(person)), toYear(getPersonDeathDate(person))]);
-  if (eventYears.length === 0 && personYears.length === 0) {
-    return (
-      <div className="timeline-board">
-        <div className="empty-state">
-          <BookOpen size={22} />
-          <span>該当する年表データがありません</span>
-        </div>
-      </div>
-    );
-  }
-  const minYear = Math.floor(Math.min(...eventYears, ...personYears) / 10) * 10;
-  const maxYear = Math.ceil(Math.max(...eventYears, ...personYears) / 10) * 10;
+  const personYears = people.flatMap((person) => [getTimelineYearPosition(getPersonBirthDate(person)), getTimelineYearPosition(getPersonDeathDate(person))]);
+  const hasTimelineData = eventYears.length > 0 || personYears.length > 0;
+  const allTimelineYears = [...eventYears, ...personYears];
+  const minYear = hasTimelineData ? Math.floor(Math.min(...allTimelineYears) / 10) * 10 : 0;
+  const maxYear = hasTimelineData ? Math.ceil(Math.max(...allTimelineYears) / 10) * 10 : 10;
   const span = maxYear - minYear || 1;
   const timelinePixelWidth = getTimelinePixelWidth(span, zoom);
   const tickStep = getYearTickStep(zoom, span);
@@ -1144,7 +1322,7 @@ function TimelineView({
   const eraHeight = visibleEras.length > 0 ? eraGroups.length * eraRowHeight + 10 : 0;
 
   function positionPercent(date: string) {
-    return Math.min(100, Math.max(0, ((toYear(date) - minYear) / span) * 100));
+    return Math.min(100, Math.max(0, ((getTimelineYearPosition(date) - minYear) / span) * 100));
   }
 
   function positionYearPercent(year: number) {
@@ -1171,7 +1349,7 @@ function TimelineView({
             lane: Math.max(0, countryLanes.indexOf(targetCountry)),
             country: targetCountry,
             left,
-            width: Math.max(right - left, 0.08),
+            width: item.displayType === "Point" ? 0.08 : Math.max(right - left, 0.001),
             visualWidth: item.displayType === "Point" ? 8 : Math.max(right - left, 0.08),
             stack: 0,
           };
@@ -1196,11 +1374,12 @@ function TimelineView({
   const personPlacements = people
     .map((person) => {
       const left = positionPercent(getPersonBirthDate(person));
-      const right = positionPercent(getPersonDeathDate(person));
+      const right = positionPercent(getPersonDeathTimelineDate(person));
       return {
         person,
         left,
-        width: Math.max(right - left, 4),
+        width: Math.max(right - left, 0.08),
+        visualWidth: Math.max(right - left, 4),
         stack: 0,
       };
     })
@@ -1210,7 +1389,7 @@ function TimelineView({
     const stack = personStackEnds.findIndex((end) => placement.left > end + 1);
     const nextStack = stack === -1 ? personStackEnds.length : stack;
     placement.stack = nextStack;
-    personStackEnds[nextStack] = placement.left + placement.width;
+    personStackEnds[nextStack] = placement.left + placement.visualWidth;
   });
   const personStackCount = Math.max(1, personStackEnds.length);
   const rowHeight = Math.max(116, Math.round((104 + maxEventStack * 32) * heightZoom));
@@ -1220,14 +1399,22 @@ function TimelineView({
     return eraHeight + lane * rowHeight;
   }
 
-  function zoomBy(factor: number) {
+  function zoomBy(factor: number, viewportX?: number) {
+    const element = timelineBoardRef.current;
+    if (element && viewportX !== undefined) {
+      pendingTimelineAnchorRef.current = {
+        ratio: (element.scrollLeft + viewportX) / Math.max(element.scrollWidth, 1),
+        viewportX,
+      };
+    }
     onZoomChange((current) => clampTimelineZoom(current * factor));
   }
 
   function handleTimelineWheel(event: WheelEvent<HTMLDivElement>) {
     if (!event.metaKey && !event.ctrlKey) return;
     event.preventDefault();
-    zoomBy(Math.exp(-event.deltaY * 0.0012));
+    const rect = event.currentTarget.getBoundingClientRect();
+    zoomBy(Math.exp(-event.deltaY * 0.0012), event.clientX - rect.left);
   }
 
   function getTouchDistance(event: TouchEvent<HTMLDivElement>) {
@@ -1246,7 +1433,9 @@ function TimelineView({
     if (!nextDistance || !previousDistance) return;
     event.preventDefault();
     const factor = Math.min(1.18, Math.max(0.85, nextDistance / previousDistance));
-    zoomBy(factor);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const midpointX = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left;
+    zoomBy(factor, midpointX);
     pinchDistanceRef.current = nextDistance;
   }
 
@@ -1254,9 +1443,49 @@ function TimelineView({
     pinchDistanceRef.current = null;
   }
 
+  function updateTimelineScrollState() {
+    const element = timelineBoardRef.current;
+    if (!element) return;
+    setTimelineScrollLeft(element.scrollLeft);
+    setTimelineScrollMax(Math.max(0, element.scrollWidth - element.clientWidth));
+  }
+
+  useLayoutEffect(() => {
+    const anchor = pendingTimelineAnchorRef.current;
+    const element = timelineBoardRef.current;
+    if (anchor && element) {
+      const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth);
+      element.scrollLeft = Math.min(maxScroll, Math.max(0, anchor.ratio * element.scrollWidth - anchor.viewportX));
+      pendingTimelineAnchorRef.current = null;
+    }
+    updateTimelineScrollState();
+  }, [timelinePixelWidth]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(updateTimelineScrollState);
+    window.addEventListener("resize", updateTimelineScrollState);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateTimelineScrollState);
+    };
+  }, [timelinePixelWidth, rowHeight, personRowHeight, eraHeight, countryLanes.length]);
+
+  if (!hasTimelineData) {
+    return (
+      <div className="timeline-board">
+        <div className="empty-state">
+          <BookOpen size={22} />
+          <span>該当する年表データがありません</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="timeline-board"
+      ref={timelineBoardRef}
+      onScroll={updateTimelineScrollState}
       onWheel={handleTimelineWheel}
       onTouchStart={handleTimelineTouchStart}
       onTouchMove={handleTimelineTouchMove}
@@ -1377,6 +1606,23 @@ function TimelineView({
           })}
         </div>
       </div>
+      {timelineScrollMax > 0 && (
+        <div className="timeline-scroll-control">
+          <input
+            aria-label="年表の横移動"
+            max={timelineScrollMax}
+            min={0}
+            type="range"
+            value={Math.min(timelineScrollLeft, timelineScrollMax)}
+            onChange={(event) => {
+              const nextLeft = Number(event.target.value);
+              const element = timelineBoardRef.current;
+              if (element) element.scrollLeft = nextLeft;
+              setTimelineScrollLeft(nextLeft);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -1464,8 +1710,9 @@ function MapView({
       .map((item): EventMapPin | undefined => {
         const locationName = item.locationName?.trim();
         if (!locationName) return undefined;
-        const countryId = getRecordCountryIds(item)[0];
-        const countryNames = getRecordCountryIds(item).map((id) => getCountryName(countries, id));
+        const countryIds = getRecordCountryIds(item);
+        const countryId = countryIds[0];
+        const countryNames = countryIds.map((id) => getCountryName(countries, id));
         if (locationName && hasCoordinates(item)) {
           return {
             item,
@@ -1486,7 +1733,7 @@ function MapView({
             countryId,
           };
         }
-        const representativeLocation = getRepresentativeLocation(locationName, regions, countryNames);
+        const representativeLocation = getRepresentativeLocation(locationName, regions, countryNames, countryIds);
         if (representativeLocation) {
           return {
             item,
@@ -1529,28 +1776,40 @@ function MapView({
           pendingItems.forEach((item) => {
             const address = item.locationName?.trim();
             if (!address) return;
-            const countryNames = getRecordCountryIds(item).map((id) => getCountryName(countries, id));
-            const representativeLocation = getRepresentativeLocation(address, regions, countryNames);
-            geocoder.geocode({ address: [address, ...countryNames].join(" "), region: "JP" }, (results: any[], status: string) => {
-              if (cancelled) return;
-              if (status !== "OK" || !results?.[0]?.geometry?.location) {
-                if (representativeLocation) {
-                  setGeocodedLocations((current) => ({ ...current, [item.id]: representativeLocation }));
-                }
-                return;
-              }
-              const location = results[0].geometry.location;
-              const nextLocation = {
-                latitude: location.lat(),
-                longitude: location.lng(),
-              };
+            const countryIds = getRecordCountryIds(item);
+            const countryNames = countryIds.map((id) => getCountryName(countries, id));
+            const representativeLocation = getRepresentativeLocation(address, regions, countryNames, countryIds);
+            const queries = buildLocationQueries(address, countryNames, countryIds);
+            let queryIndex = 0;
+            const saveResolvedLocation = (nextLocation: MapPoint) => {
               setGeocodedLocations((current) => ({ ...current, [item.id]: nextLocation }));
               onUpdateEvent(item.id, {
                 locationLat: nextLocation.latitude,
                 locationLng: nextLocation.longitude,
                 regionIds: [],
               });
-            });
+            };
+            const tryNextQuery = () => {
+              const query = queries[queryIndex];
+              if (!query) {
+                if (representativeLocation) saveResolvedLocation(representativeLocation);
+                return;
+              }
+              queryIndex += 1;
+              geocoder.geocode({ address: query, region: "JP" }, (results: any[], status: string) => {
+                if (cancelled) return;
+                if (status !== "OK" || !results?.[0]?.geometry?.location) {
+                  tryNextQuery();
+                  return;
+                }
+                const location = results[0].geometry.location;
+                saveResolvedLocation({
+                  latitude: location.lat(),
+                  longitude: location.lng(),
+                });
+              });
+            };
+            tryNextQuery();
           });
         })
         .catch(() => {
@@ -1755,6 +2014,8 @@ function ChipEditor({
   placeholder,
   renderValue,
   maxValues,
+  allowCustom = true,
+  createValue,
 }: {
   label: string;
   values: string[];
@@ -1763,6 +2024,8 @@ function ChipEditor({
   placeholder?: string;
   renderValue?: (value: string) => string;
   maxValues?: number;
+  allowCustom?: boolean;
+  createValue?: (draft: string) => string | undefined;
 }) {
   const [draft, setDraft] = useState("");
   const optionLabels = new Map((options ?? []).map((option) => [option.label, option.value]));
@@ -1772,8 +2035,8 @@ function ChipEditor({
   function addValue() {
     const trimmed = draft.trim();
     if (!trimmed) return;
-    const next = optionLabels.get(trimmed) ?? trimmed;
-    if (options && !optionValues.has(next)) return;
+    const next = optionLabels.get(trimmed) ?? createValue?.(trimmed) ?? trimmed;
+    if (options && !allowCustom && !optionValues.has(next)) return;
     const nextValues = uniqueValues([...values, next]);
     onChange(maxValues === 1 ? [next] : nextValues.slice(0, maxValues ?? nextValues.length));
     setDraft("");
@@ -1818,6 +2081,115 @@ function ChipEditor({
           <Plus size={14} />
         </button>
       </div>
+    </div>
+  );
+}
+
+function HistoricalDateInput({
+  label,
+  value,
+  onChange,
+  allowEmpty = false,
+}: {
+  label: string;
+  value?: string;
+  onChange: (value: string | undefined) => void;
+  allowEmpty?: boolean;
+}) {
+  const parsedValue = clampHistoricalDateParts(parseHistoricalDateParts(value) ?? { year: 1914, month: 1, day: 1 });
+  const [search, setSearch] = useState(formatHistoricalDateSearch(value));
+  const [draft, setDraft] = useState(parsedValue);
+
+  useEffect(() => {
+    const next = clampHistoricalDateParts(parseHistoricalDateParts(value) ?? { year: 1914, month: 1, day: 1 });
+    setDraft(next);
+    setSearch(formatHistoricalDateSearch(value));
+  }, [value]);
+
+  function commitDate(nextParts: HistoricalDateParts) {
+    const next = clampHistoricalDateParts(nextParts);
+    setDraft(next);
+    const serialized = serializeHistoricalDate(next);
+    setSearch(formatHistoricalDateSearch(serialized));
+    onChange(serialized);
+  }
+
+  function applySearch() {
+    const parsed = parseHistoricalDateParts(search);
+    if (!parsed) {
+      if (allowEmpty && !search.trim()) onChange(undefined);
+      return;
+    }
+    commitDate(parsed);
+  }
+
+  const daysInMonth = getDaysInHistoricalMonth(draft.year, draft.month);
+
+  return (
+    <div className="historical-date-input">
+      <span>{label}</span>
+      <div className="date-search-row">
+        <input
+          value={search}
+          onBlur={applySearch}
+          onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              applySearch();
+            }
+          }}
+          placeholder="例: 前431-04-01 / 1914-07-28"
+        />
+        {allowEmpty && (
+          <button type="button" onClick={() => onChange(undefined)}>
+            クリア
+          </button>
+        )}
+      </div>
+      <div className="date-picker-controls">
+        <button type="button" onClick={() => commitDate({ ...draft, year: draft.year - 1 })}>
+          年-
+        </button>
+        <strong>{draft.year < 1 ? `前${Math.abs(draft.year) + 1}年` : `${draft.year}年`}</strong>
+        <button type="button" onClick={() => commitDate({ ...draft, year: draft.year + 1 })}>
+          年+
+        </button>
+        <select
+          value={draft.month}
+          onChange={(event) => commitDate({ ...draft, month: Number(event.target.value) })}
+        >
+          {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+            <option key={month} value={month}>
+              {month}月
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="date-day-grid">
+        {Array.from({ length: daysInMonth }, (_, index) => index + 1).map((day) => (
+          <button
+            className={day === draft.day ? "active" : ""}
+            key={day}
+            type="button"
+            onClick={() => commitDate({ ...draft, day })}
+          >
+            {day}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HashtagList({ values }: { values?: string[] }) {
+  const tags = values ?? [];
+  if (tags.length === 0) return null;
+  return (
+    <div className="chips hashtag-list">
+      {tags.map((item) => (
+        <span key={item}>#{item}</span>
+      ))}
     </div>
   );
 }
@@ -1991,6 +2363,10 @@ function DetailPanel({
   onUpdateEvent,
   onUpdatePerson,
   onUpdateTerm,
+  onDeleteEvent,
+  onDeletePerson,
+  onDeleteTerm,
+  onResolveCountry,
   renderLinkedText,
   termPopup,
 }: {
@@ -2009,6 +2385,10 @@ function DetailPanel({
   onUpdateEvent: (id: string, patch: Partial<Event>) => void;
   onUpdatePerson: (id: string, patch: Partial<Person>) => void;
   onUpdateTerm: (id: string, patch: Partial<TermCard>) => void;
+  onDeleteEvent: (id: string) => void;
+  onDeletePerson: (id: string) => void;
+  onDeleteTerm: (id: string) => void;
+  onResolveCountry: (value: string) => string | undefined;
   renderLinkedText: (text: string, terms: string[]) => ReactNode;
   termPopup: TermPopup | null;
 }) {
@@ -2075,13 +2455,9 @@ function DetailPanel({
                 </span>
               </div>
             )}
+            <HashtagList values={event.genres} />
             <p>{renderLinkedText(event.detail, event.terms)}</p>
             <RichContentView blocks={event.contentBlocks} />
-            <div className="chips hashtag-list">
-              {(event.genres ?? []).map((item) => (
-                <span key={item}>#{item}</span>
-              ))}
-            </div>
             {(event.references ?? []).length > 0 && (
               <div className="references">
                 <h3>参考資料</h3>
@@ -2099,26 +2475,30 @@ function DetailPanel({
                 <input value={event.title} onChange={(input) => onUpdateEvent(event.id, { title: input.target.value })} />
               </label>
               <div className="date-fields">
-                <label>
-                  開始日
-                  <input value={event.startDate} onChange={(input) => onUpdateEvent(event.id, { startDate: input.target.value })} />
-                </label>
-                <label>
-                  終了日
-                  <input value={event.endDate ?? ""} onChange={(input) => onUpdateEvent(event.id, { endDate: input.target.value || undefined })} />
-                </label>
+                <HistoricalDateInput label="開始年月日" value={event.startDate} onChange={(value) => onUpdateEvent(event.id, { startDate: value ?? "" })} />
+                <HistoricalDateInput label="終了年月日" value={event.endDate} onChange={(value) => onUpdateEvent(event.id, { endDate: value })} allowEmpty />
               </div>
               <label>
                 カテゴリ
-                <select value={event.category} onChange={(input) => onUpdateEvent(event.id, { category: input.target.value as Category })}>
+                <input
+                  list="event-category-options"
+                  value={event.category}
+                  onChange={(input) => onUpdateEvent(event.id, { category: input.target.value as Category })}
+                  placeholder="例: 宗教"
+                />
+                <datalist id="event-category-options">
                   {categories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                </select>
+                    <option key={category} value={category} />
+                  ))}
+                </datalist>
               </label>
-              <ChipEditor label="ジャンル" values={event.genres ?? []} onChange={(values) => onUpdateEvent(event.id, { genres: values })} placeholder="例: 暗殺" />
+              <ChipEditor
+                label="ジャンル"
+                values={event.genres ?? []}
+                onChange={(values) => onUpdateEvent(event.id, { genres: values })}
+                options={genres.map((genre) => ({ value: genre, label: genre }))}
+                placeholder="例: 暗殺"
+              />
               <ChipEditor
                 label="国"
                 values={getRecordCountryIds(event)}
@@ -2126,6 +2506,7 @@ function DetailPanel({
                 options={countries.map((country) => ({ value: country.id, label: country.name }))}
                 placeholder="国を選択"
                 renderValue={(value) => getCountryName(countries, value)}
+                createValue={onResolveCountry}
               />
               <label>
                 発生地点
@@ -2161,6 +2542,9 @@ function DetailPanel({
               <ChipEditor label="紐付ける単語" values={event.terms} onChange={(values) => onUpdateEvent(event.id, { terms: values })} placeholder="例: 第一次世界大戦" />
               <ChipEditor label="画像URL" values={event.imageUrls ?? []} onChange={(values) => onUpdateEvent(event.id, { imageUrls: values })} placeholder="画像URLを追加" />
               <ChipEditor label="参考資料" values={event.references ?? []} onChange={(values) => onUpdateEvent(event.id, { references: values })} placeholder="資料名・URLを追加" />
+              <button className="delete-card-button" type="button" onClick={() => onDeleteEvent(event.id)}>
+                この出来事を削除
+              </button>
             </div>
           )}
         </div>
@@ -2185,11 +2569,7 @@ function DetailPanel({
             </div>
             <p>{renderLinkedText(person.summary, [...person.affiliations, ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])}</p>
             <RichContentView blocks={person.contentBlocks} />
-            <div className="chips hashtag-list">
-              {(person.genres ?? []).map((item) => (
-                <span key={item}>#{item}</span>
-              ))}
-            </div>
+            <HashtagList values={person.genres} />
             {(person.references ?? []).length > 0 && (
               <div className="references">
                 <h3>参考資料</h3>
@@ -2207,55 +2587,35 @@ function DetailPanel({
                 <input value={person.name} onChange={(input) => onUpdatePerson(person.id, { name: input.target.value })} />
               </label>
               <div className="date-fields">
-                <label>
-                  生年
-                  <input
-                    type="number"
-                    value={person.birthYear}
-                    onChange={(input) => onUpdatePerson(person.id, { birthYear: Number(input.target.value) })}
-                  />
-                </label>
-                <label>
-                  没年
-                  <input
-                    type="number"
-                    value={person.deathYear}
-                    onChange={(input) => onUpdatePerson(person.id, { deathYear: Number(input.target.value) })}
-                  />
-                </label>
-              </div>
-              <div className="date-fields">
-                <label>
-                  生年月日
-                  <input
-                    placeholder="例: 1863-12-18"
-                    value={person.birthDate ?? ""}
-                    onChange={(input) => {
-                      const birthDate = input.target.value.trim();
-                      onUpdatePerson(person.id, {
-                        birthDate: birthDate || undefined,
-                        ...(birthDate ? { birthYear: toYear(birthDate) } : {}),
-                      });
-                    }}
-                  />
-                </label>
-                <label>
-                  没年月日
-                  <input
-                    placeholder="例: 1914-06-28"
-                    value={person.deathDate ?? ""}
-                    onChange={(input) => {
-                      const deathDate = input.target.value.trim();
-                      onUpdatePerson(person.id, {
-                        deathDate: deathDate || undefined,
-                        ...(deathDate ? { deathYear: toYear(deathDate) } : {}),
-                      });
-                    }}
-                  />
-                </label>
+                <HistoricalDateInput
+                  label="生年月日"
+                  value={person.birthDate ?? `${person.birthYear}-01-01`}
+                  onChange={(value) =>
+                    onUpdatePerson(person.id, {
+                      birthDate: value,
+                      birthYear: value ? toYear(value) : 0,
+                    })
+                  }
+                />
+                <HistoricalDateInput
+                  label="没年月日"
+                  value={person.deathDate ?? `${person.deathYear}-12-31`}
+                  onChange={(value) =>
+                    onUpdatePerson(person.id, {
+                      deathDate: value,
+                      deathYear: value ? toYear(value) : 0,
+                    })
+                  }
+                />
               </div>
               <ChipEditor label="所属・紐付ける単語" values={person.affiliations} onChange={(values) => onUpdatePerson(person.id, { affiliations: values })} placeholder="例: ハプスブルク家" />
-              <ChipEditor label="ジャンル" values={person.genres ?? []} onChange={(values) => onUpdatePerson(person.id, { genres: values })} placeholder="例: 政治家" />
+              <ChipEditor
+                label="ジャンル"
+                values={person.genres ?? []}
+                onChange={(values) => onUpdatePerson(person.id, { genres: values })}
+                options={genres.map((genre) => ({ value: genre, label: genre }))}
+                placeholder="例: 政治家"
+              />
               <ChipEditor
                 label="国"
                 values={getRecordCountryIds(person)}
@@ -2263,6 +2623,7 @@ function DetailPanel({
                 options={countries.map((country) => ({ value: country.id, label: country.name }))}
                 placeholder="国を選択"
                 renderValue={(value) => getCountryName(countries, value)}
+                createValue={onResolveCountry}
               />
               <ChipEditor
                 label="地域・ピン"
@@ -2271,6 +2632,7 @@ function DetailPanel({
                 options={regions.map((region) => ({ value: region.id, label: `${getCountryName(countries, region.countryId)} / ${region.name}` }))}
                 placeholder="地域を選択"
                 renderValue={(value) => getRegionName(regions, value)}
+                allowCustom={false}
               />
               <label>
                 概要
@@ -2286,6 +2648,9 @@ function DetailPanel({
               </label>
               <ChipEditor label="画像URL" values={person.imageUrls ?? []} onChange={(values) => onUpdatePerson(person.id, { imageUrls: values })} placeholder="画像URLを追加" />
               <ChipEditor label="参考資料" values={person.references ?? []} onChange={(values) => onUpdatePerson(person.id, { references: values })} placeholder="資料名・URLを追加" />
+              <button className="delete-card-button" type="button" onClick={() => onDeletePerson(person.id)}>
+                この人物を削除
+              </button>
             </div>
           )}
         </div>
@@ -2310,11 +2675,7 @@ function DetailPanel({
             </div>
             <p>{renderLinkedText(term.detail, term.relatedTerms)}</p>
             <RichContentView blocks={term.contentBlocks} />
-            <div className="chips hashtag-list">
-              {(term.genres ?? []).map((item) => (
-                <span key={item}>#{item}</span>
-              ))}
-            </div>
+            <HashtagList values={term.genres} />
             {(term.references ?? []).length > 0 && (
               <div className="references">
                 <h3>参考資料</h3>
@@ -2333,18 +2694,25 @@ function DetailPanel({
               </label>
               <label>
                 種別
-                <select
+                <input
+                  list="term-category-options"
                   value={term.category}
                   onChange={(input) => onUpdateTerm(term.id, { category: input.target.value as TermCard["category"] })}
-                >
+                  placeholder="例: 思想"
+                />
+                <datalist id="term-category-options">
                   {termCategories.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
+                    <option key={category} value={category} />
                   ))}
-                </select>
+                </datalist>
               </label>
-              <ChipEditor label="ジャンル" values={term.genres ?? []} onChange={(values) => onUpdateTerm(term.id, { genres: values })} placeholder="例: 思想史" />
+              <ChipEditor
+                label="ジャンル"
+                values={term.genres ?? []}
+                onChange={(values) => onUpdateTerm(term.id, { genres: values })}
+                options={genres.map((genre) => ({ value: genre, label: genre }))}
+                placeholder="例: 思想史"
+              />
               <ChipEditor label="別名" values={term.aliases} onChange={(values) => onUpdateTerm(term.id, { aliases: values })} placeholder="別名を追加" />
               <label>
                 概要
@@ -2365,6 +2733,9 @@ function DetailPanel({
               <ChipEditor label="紐付ける単語" values={term.relatedTerms} onChange={(values) => onUpdateTerm(term.id, { relatedTerms: values })} placeholder="例: ポリス" />
               <ChipEditor label="画像URL" values={term.imageUrls ?? []} onChange={(values) => onUpdateTerm(term.id, { imageUrls: values })} placeholder="画像URLを追加" />
               <ChipEditor label="参考資料" values={term.references ?? []} onChange={(values) => onUpdateTerm(term.id, { references: values })} placeholder="資料名・URLを追加" />
+              <button className="delete-card-button" type="button" onClick={() => onDeleteTerm(term.id)}>
+                この単語カードを削除
+              </button>
             </div>
           )}
         </div>

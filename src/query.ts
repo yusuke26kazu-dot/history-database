@@ -1,8 +1,11 @@
 import type { Category, Event, Person, PersonEvent, TimelineItem } from "./models";
 
 export function getHistoricalYear(date: string) {
-  const match = date.match(/^(-?\d{1,6})/);
-  return match ? Number(match[1]) : new Date(`${date}T00:00:00`).getFullYear();
+  const safeDate = String(date ?? "").trim();
+  const match = safeDate.match(/^(-?\d{1,6})/);
+  if (match) return Number(match[1]);
+  const year = new Date(`${safeDate}T00:00:00`).getFullYear();
+  return Number.isFinite(year) ? year : 0;
 }
 
 export type TimelineFilter = {
@@ -26,7 +29,7 @@ export function buildTimelineItems(
         .filter((person): person is Person & { role: string } => Boolean(person));
 
       const displayType: TimelineItem["displayType"] =
-        event.endDate && event.endDate !== event.startDate ? "Range" : "Point";
+        event.startDate && event.endDate && event.endDate !== event.startDate ? "Range" : "Point";
 
       return {
         ...event,
