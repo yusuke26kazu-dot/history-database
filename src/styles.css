@@ -1381,6 +1381,10 @@ textarea:focus {
 }
 
 .timeline-board {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   max-height: calc(100vh - 58px);
   height: calc(100vh - 58px);
   border: 0;
@@ -1388,7 +1392,8 @@ textarea:focus {
   background: #ffffff;
   box-shadow: none;
   padding: 0;
-  overflow: auto;
+  overflow-x: scroll;
+  overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   touch-action: pan-x pan-y;
@@ -1523,6 +1528,7 @@ textarea:focus {
   border: 8px solid #ffe7aa;
   background: #ffc928;
   box-shadow: 0 0 0 1px rgb(255 201 40 / 25%);
+  transform: translate(-50%, -50%);
 }
 
 .card-title {
