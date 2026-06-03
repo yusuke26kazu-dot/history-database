@@ -324,6 +324,15 @@ function toEmbedUrl(value: string) {
   }
 }
 
+function getEventMapEmbedUrl(event: Event) {
+  const locationName = event.locationName?.trim();
+  if (!locationName) return "";
+  const query = hasCoordinates(event)
+    ? `${event.locationLat},${event.locationLng}`
+    : locationName;
+  return `https://www.google.com/maps?q=${encodeURIComponent(query)}&z=8&output=embed`;
+}
+
 function App() {
   const [events, setEvents] = useState<Event[]>(seedEvents);
   const [people, setPeople] = useState<Person[]>(seedPeople);
@@ -1398,6 +1407,7 @@ function MapView({
     return items
       .map((item): EventMapPin | undefined => {
         const locationName = item.locationName?.trim();
+        if (!locationName) return undefined;
         if (locationName && hasCoordinates(item)) {
           return {
             item,
@@ -1418,21 +1428,10 @@ function MapView({
             countryId: getRecordCountryIds(item)[0],
           };
         }
-
-        const regionId = !locationName ? getRecordRegionIds(item)[0] : undefined;
-        const region = regionId ? regions.find((candidate) => candidate.id === regionId) : undefined;
-        return region
-          ? {
-              item,
-              locationName: region.name,
-              latitude: region.latitude,
-              longitude: region.longitude,
-              countryId: region.countryId,
-            }
-          : undefined;
+        return undefined;
       })
       .filter((pin): pin is EventMapPin => Boolean(pin));
-  }, [geocodedLocations, items, regions]);
+  }, [geocodedLocations, items]);
   const focusedEventPin = eventPins.find((pin) => pin.item.id === focusedEventId);
   const previewEventPin = eventPins.find((pin) => pin.item.id === previewEventId);
 
@@ -1587,44 +1586,51 @@ function MapView({
         )}
       </section>
       <aside className="map-events">
-        {eventPins.map((pin) => (
-          <button
-            className={focusedEventId === pin.item.id || previewEventId === pin.item.id ? "active" : ""}
-            key={`${pin.item.id}-${pin.locationName}`}
-            type="button"
+        <div className="map-event-list">
+          {eventPins.length === 0 && <p className="map-empty">発生地点が設定された出来事がありません。</p>}
+          {eventPins.map((pin) => (
+            <button
+              className={focusedEventId === pin.item.id || previewEventId === pin.item.id ? "active" : ""}
+              key={`${pin.item.id}-${pin.locationName}`}
+              type="button"
             onClick={() => {
               setFocusedEventId(pin.item.id);
               setPreviewEventId("");
             }}
+            onDoubleClick={() => onOpenRecord({ type: "event", id: pin.item.id })}
           >
-            <MapPin size={16} />
-            <span>
-              <strong>{pin.item.title}</strong>
-              <small>
-                {pin.locationName}
-                {pin.countryId ? ` / ${getCountryName(countries, pin.countryId)}` : ""}
-              </small>
-            </span>
-            <b>{toDisplayYear(toYear(pin.item.startDate))}</b>
-          </button>
-        ))}
-      </aside>
-      {previewEventPin && (
-        <section className="map-detail">
-          <span className="knowledge-label">
-            {previewEventPin.locationName}
-            {previewEventPin.countryId ? ` / ${getCountryName(countries, previewEventPin.countryId)}` : ""}
-          </span>
-          <h2>{previewEventPin.item.title}</h2>
-          <p>{previewEventPin.item.summary}</p>
-          <div className="map-record-list">
-            <button type="button" onClick={() => onOpenRecord({ type: "event", id: previewEventPin.item.id })}>
-              <span>詳細カード</span>
-              {previewEventPin.item.title}
+              <MapPin size={16} />
+              <span>
+                <strong>{pin.item.title}</strong>
+                <small>
+                  {pin.locationName}
+                  {pin.countryId ? ` / ${getCountryName(countries, pin.countryId)}` : ""}
+                </small>
+              </span>
+              <b>{toDisplayYear(toYear(pin.item.startDate))}</b>
             </button>
-          </div>
-        </section>
-      )}
+          ))}
+        </div>
+        {previewEventPin && (
+          <section className="map-detail">
+            <button className="map-detail-close" type="button" onClick={() => setPreviewEventId("")}>
+              閉じる
+            </button>
+            <span className="knowledge-label">
+              {previewEventPin.locationName}
+              {previewEventPin.countryId ? ` / ${getCountryName(countries, previewEventPin.countryId)}` : ""}
+            </span>
+            <h2>{previewEventPin.item.title}</h2>
+            <p>{previewEventPin.item.summary}</p>
+            <div className="map-record-list">
+              <button type="button" onClick={() => onOpenRecord({ type: "event", id: previewEventPin.item.id })}>
+                <span>詳細カード</span>
+                {previewEventPin.item.title}
+              </button>
+            </div>
+          </section>
+        )}
+      </aside>
     </div>
   );
 }
@@ -1975,6 +1981,20 @@ function DetailPanel({
                 </small>
               </div>
             </div>
+            {event.locationName?.trim() && (
+              <div className="detail-location-map">
+                <iframe
+                  title={`${event.title}の発生地点`}
+                  src={getEventMapEmbedUrl(event)}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+                <span>
+                  <MapPin size={15} />
+                  {event.locationName}
+                </span>
+              </div>
+            )}
             <p>{renderLinkedText(event.detail, event.terms)}</p>
             <RichContentView blocks={event.contentBlocks} />
             <div className="chips hashtag-list">
