@@ -1397,6 +1397,8 @@ textarea:focus {
 .timeline-scale {
   top: 0;
   height: 32px;
+  width: var(--timeline-width);
+  min-width: var(--timeline-width);
   margin-left: 0;
   background: #ffffff;
   border-bottom: 1px solid #dbe3e8;
@@ -1406,6 +1408,8 @@ textarea:focus {
 }
 
 .timeline-grid {
+  width: var(--timeline-width);
+  min-width: var(--timeline-width);
   grid-template-columns: var(--timeline-width);
   min-height: calc(var(--era-height) + var(--country-rows) * var(--row-height) + var(--person-row-height));
 }
@@ -1442,6 +1446,8 @@ textarea:focus {
 }
 
 .lane-canvas {
+  width: var(--timeline-width);
+  min-width: var(--timeline-width);
   background: #ffffff;
 }
 
