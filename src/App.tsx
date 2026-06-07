@@ -2790,9 +2790,13 @@ function LearningFilesView({ files, onDelete }: { files?: LearningFile[]; onDele
           {file.type === "audio" && <audio controls src={file.dataUrl} />}
           {file.type === "image" && <img src={file.dataUrl} alt={file.name} />}
           {file.type === "pdf" && (
-            <a href={file.dataUrl} target="_blank" rel="noreferrer">
-              PDFを開く
-            </a>
+            <div className="learning-pdf-preview">
+              <object data={file.dataUrl} type="application/pdf" aria-label={file.name}>
+                <a href={file.dataUrl} target="_blank" rel="noreferrer">
+                  PDFを開く
+                </a>
+              </object>
+            </div>
           )}
           {file.type === "file" && (
             <a href={file.dataUrl} download={file.name}>
@@ -3072,25 +3076,22 @@ function RelatedCardsSection({
 }) {
   if (cards.length === 0) return null;
   return (
-    <div className="references">
-      <h3>関連項目</h3>
-      <div className="record-group-grid" style={{ marginTop: "1rem" }}>
-        {cards.map((card) => (
-          <button
-            className={`person-card compact record-card has-label ${card.type}-record-card`}
-            key={`${card.type}-${card.id}`}
-            onClick={() => onOpenRecord({ type: card.type, id: card.id })}
-            type="button"
-          >
-            <div className="person-thumb">
-              {card.type === "event" ? <CalendarDays size={22} /> : card.type === "person" ? <UserRound size={22} /> : <BookOpen size={22} />}
-            </div>
-            <span className="record-card-label">{card.label}</span>
-            <span>{card.title}</span>
-            <small>{card.meta}</small>
-          </button>
-        ))}
-      </div>
+    <div className="record-group-grid related-card-grid">
+      {cards.map((card) => (
+        <button
+          className={`person-card compact record-card has-label ${card.type}-record-card`}
+          key={`${card.type}-${card.id}`}
+          onClick={() => onOpenRecord({ type: card.type, id: card.id })}
+          type="button"
+        >
+          <div className="person-thumb">
+            {card.type === "event" ? <CalendarDays size={22} /> : card.type === "person" ? <UserRound size={22} /> : <BookOpen size={22} />}
+          </div>
+          <span className="record-card-label">{card.label}</span>
+          <span>{card.title}</span>
+          <small>{card.meta}</small>
+        </button>
+      ))}
     </div>
   );
 }
