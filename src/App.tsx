@@ -29,6 +29,7 @@ type ViewMode = "timeline" | "map" | "category" | "people" | "terms" | "cards";
 type TimelineLaneMode = "country" | "plain";
 type CardGroupMode = "all" | "category" | "country";
 type TermPopup = { term: string; definition: string; target?: EditableRecord };
+let pdfJsModulePromise: Promise<any> | null = null;
 type KnowledgeCard = {
   id: string;
   type: EditableRecord["type"];
@@ -64,6 +65,7 @@ type PersistedDatabase = {
   customGenres: string[];
   savedAt?: string;
 };
+const currentDatabaseVersion = 2;
 type EventPlacement = {
   item: TimelineItem;
   lane: number;
@@ -74,8 +76,15 @@ type EventPlacement = {
   stack: number;
 };
 
-const baseCategories: Category[] = ["戦争", "外交", "暗殺", "政治", "革命", "講和", "思想", "裁判"];
+const baseCategories: Category[] = ["戦争", "イベント", "発明", "文化"];
 const baseTermCategories = ["用語", "概念", "地域", "史料"];
+const timelineCategoryOrder = baseCategories;
+const eventCategoryColors: Record<string, { background: string; mark: string; text: string }> = {
+  戦争: { background: "#ffcdd2", mark: "#e53935", text: "#241a00" },
+  イベント: { background: "#f7c948", mark: "#f7c948", text: "#241a00" },
+  文化: { background: "#d1c4e9", mark: "#7c3aed", text: "#241a00" },
+  発明: { background: "#e3f2fd", mark: "#1976d2", text: "#241a00" },
+};
 const viewModes: Array<{ id: ViewMode; label: string; icon: typeof Rows3 }> = [
   { id: "timeline", label: "年表", icon: Rows3 },
   { id: "map", label: "地図", icon: MapPin },
@@ -479,6 +488,26 @@ function groupRecords<T extends { id: string }>(records: T[], getLabels: (record
     .sort((a, b) => a.label.localeCompare(b.label, "ja"));
 }
 
+function sortEventCategories(categories: string[]) {
+  return [...categories].sort((a, b) => {
+    const aIndex = timelineCategoryOrder.indexOf(a);
+    const bIndex = timelineCategoryOrder.indexOf(b);
+    if (aIndex !== -1 || bIndex !== -1) {
+      return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex);
+    }
+    return a.localeCompare(b, "ja");
+  });
+}
+
+function normalizeEventCategory(category: string | undefined): Category {
+  if (category === "戦争" || category === "文化" || category === "発明" || category === "イベント") return category;
+  return "イベント";
+}
+
+function getEventCategoryColor(category: string) {
+  return eventCategoryColors[normalizeEventCategory(category)] ?? eventCategoryColors["イベント"];
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -498,6 +527,53 @@ function mergeById<T extends { id: string }>(seedItems: T[], savedItems?: T[]) {
   return Array.from(merged.values());
 }
 
+function normalizeEvent(event: Event): Event {
+  return {
+    ...event,
+    category: normalizeEventCategory(event.category),
+    aliases: event.aliases ?? [],
+    relatedCountries: event.relatedCountries ?? [],
+    countryIds: event.countryIds ?? [],
+    regionIds: event.regionIds ?? [],
+    terms: event.terms ?? [],
+    contentBlocks: event.contentBlocks ?? [],
+    genres: event.genres ?? [],
+    imageUrls: event.imageUrls ?? [],
+    references: event.references ?? [],
+    learningFiles: event.learningFiles ?? [],
+  };
+}
+
+function normalizePerson(person: Person): Person {
+  return {
+    ...person,
+    aliases: person.aliases ?? [],
+    countryIds: person.countryIds ?? [],
+    regionIds: person.regionIds ?? [],
+    affiliations: person.affiliations ?? [],
+    majorWorks: person.majorWorks ?? [],
+    episodeBlocks: person.episodeBlocks ?? [],
+    contentBlocks: person.contentBlocks ?? [],
+    genres: person.genres ?? [],
+    imageUrls: person.imageUrls ?? [],
+    references: person.references ?? [],
+    learningFiles: person.learningFiles ?? [],
+  };
+}
+
+function normalizeTermCard(term: TermCard): TermCard {
+  return {
+    ...term,
+    aliases: term.aliases ?? [],
+    relatedTerms: term.relatedTerms ?? [],
+    contentBlocks: term.contentBlocks ?? [],
+    genres: term.genres ?? [],
+    imageUrls: term.imageUrls ?? [],
+    references: term.references ?? [],
+    learningFiles: term.learningFiles ?? [],
+  };
+}
+
 function createPersistedDatabase(data: {
   events: Event[];
   people: Person[];
@@ -508,14 +584,15 @@ function createPersistedDatabase(data: {
   customGenres: string[];
 }): PersistedDatabase {
   return {
-    version: 1,
-    events: data.events,
-    people: data.people,
-    termCards: data.termCards,
-    countries: data.countries,
+    version: currentDatabaseVersion,
+    events: data.events.map(normalizeEvent),
+    people: data.people.map(normalizePerson),
+    termCards: data.termCards.map(normalizeTermCard),
+    countries: data.countries.map((country) => ({ ...country, aliases: country.aliases ?? [] })),
     regions: data.regions,
     customCategories: data.customCategories,
     customGenres: data.customGenres,
+    savedAt: new Date().toISOString(),
   };
 }
 
@@ -531,8 +608,10 @@ function readLocalDatabase() {
 function writeLocalDatabase(data: PersistedDatabase) {
   try {
     window.localStorage.setItem("history-database:data", JSON.stringify(data));
+    return true;
   } catch {
     // localStorage can be unavailable in private browsing or strict file contexts.
+    return false;
   }
 }
 
@@ -673,6 +752,7 @@ function App() {
   const [regions, setRegions] = useState<Region[]>(seedRegions);
   const [viewMode, setViewMode] = useState<ViewMode>("timeline");
   const [categoryFilters, setCategoryFilters] = useState<Category[]>([]);
+  const [eventGenreFilters, setEventGenreFilters] = useState<string[]>([]);
   const [personCategoryFilters, setPersonCategoryFilters] = useState<string[]>([]);
   const [countryFilters, setCountryFilters] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -696,12 +776,13 @@ function App() {
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [topFiltersOpen, setTopFiltersOpen] = useState(false);
   const [hasLoadedSavedData, setHasLoadedSavedData] = useState(false);
+  const [remoteSaveEnabled, setRemoteSaveEnabled] = useState(false);
   const [saveStatus, setSaveStatus] = useState("読み込み中");
 
   const timelineItems = useMemo(() => buildTimelineItems(people, events, personEvents), [people, events]);
   const categories = useMemo(
-    () => uniqueValues([...baseCategories, ...customCategories, ...events.map((event) => event.category)]),
-    [customCategories, events],
+    () => baseCategories,
+    [],
   );
   const termCategories = useMemo(
     () => uniqueValues([...baseTermCategories, ...termCards.map((term) => term.category)]),
@@ -721,10 +802,21 @@ function App() {
       ]),
     [customGenres, events, people, termCards],
   );
+  const eventGenres = useMemo(
+    () =>
+      uniqueValues([
+        ...events.flatMap((event) => event.genres ?? []),
+        ...customGenres,
+      ]),
+    [customGenres, events],
+  );
   const filteredItems = useMemo(
     () =>
       timelineItems.filter((item) => {
         const matchesCategory = categoryFilters.length === 0 || categoryFilters.includes(item.category);
+        const matchesSubCategory =
+          eventGenreFilters.length === 0 ||
+          (item.genres ?? []).some((genre) => eventGenreFilters.includes(genre));
         const itemCountryIds = getRecordCountryIds(item);
         const matchesCountry =
           countryFilters.length === 0 ||
@@ -735,9 +827,9 @@ function App() {
               item.people.some((person) => getRecordCountryIds(person).includes(countryId)) ||
               item.people.some((person) => person.affiliations.includes(countryId)),
           );
-        return matchesCategory && matchesCountry;
+        return matchesCategory && matchesSubCategory && matchesCountry;
       }),
-    [categoryFilters, countryFilters, timelineItems],
+    [categoryFilters, eventGenreFilters, countryFilters, timelineItems],
   );
   const searchedItems = useMemo(() => {
     if (!searchQuery.trim()) return filteredItems;
@@ -901,10 +993,10 @@ function App() {
     activeRecord?.type === "term" ? termCards.find((term) => term.id === activeRecord.id) ?? null : null;
 
   function applyPersistedDatabase(saved: PersistedDatabase) {
-    setEvents(mergeById(seedEvents, saved.events));
-    setPeople(mergeById(seedPeople, saved.people));
-    setTermCards(mergeById(seedTermCards, saved.termCards));
-    setCountries(mergeById(seedCountries, saved.countries));
+    setEvents(mergeById(seedEvents.map(normalizeEvent), saved.events?.map(normalizeEvent)));
+    setPeople(mergeById(seedPeople.map(normalizePerson), saved.people?.map(normalizePerson)));
+    setTermCards(mergeById(seedTermCards.map(normalizeTermCard), saved.termCards?.map(normalizeTermCard)));
+    setCountries(mergeById(seedCountries, saved.countries).map((country) => ({ ...country, aliases: country.aliases ?? [] })));
     setRegions(mergeById(seedRegions, saved.regions));
     setCustomCategories(uniqueValues(saved.customCategories ?? []));
     setCustomGenres(uniqueValues(saved.customGenres ?? []));
@@ -917,6 +1009,7 @@ function App() {
       try {
         const response = await fetch("/api/data", { headers: { accept: "application/json" } });
         const remoteData = response.ok ? ((await response.json()) as PersistedDatabase | null) : null;
+        if (!cancelled && response.ok) setRemoteSaveEnabled(true);
         const saved = remoteData ?? readLocalDatabase();
         if (!cancelled && saved) {
           applyPersistedDatabase(saved);
@@ -926,6 +1019,7 @@ function App() {
           setSaveStatus("初期データ");
         }
       } catch {
+        if (!cancelled) setRemoteSaveEnabled(false);
         const localData = readLocalDatabase();
         if (!cancelled && localData) {
           applyPersistedDatabase(localData);
@@ -957,24 +1051,25 @@ function App() {
       customCategories,
       customGenres,
     });
-    writeLocalDatabase(data);
-    setSaveStatus("保存中");
+    const savedLocally = writeLocalDatabase(data);
+    setSaveStatus(remoteSaveEnabled ? "保存中" : savedLocally ? "ブラウザ内保存" : "保存失敗");
 
     const timeout = window.setTimeout(async () => {
+      if (!remoteSaveEnabled) return;
       try {
         const response = await fetch("/api/data", {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(data),
         });
-        setSaveStatus(response.ok ? "保存済み" : "ブラウザ内保存");
+        setSaveStatus(response.ok ? "保存済み" : savedLocally ? "ブラウザ内保存" : "保存失敗");
       } catch {
-        setSaveStatus("ブラウザ内保存");
+        setSaveStatus(savedLocally ? "ブラウザ内保存" : "保存失敗");
       }
     }, 700);
 
     return () => window.clearTimeout(timeout);
-  }, [events, people, termCards, countries, regions, customCategories, customGenres, hasLoadedSavedData]);
+  }, [events, people, termCards, countries, regions, customCategories, customGenres, hasLoadedSavedData, remoteSaveEnabled]);
 
   function updateEvent(id: string, patch: Partial<Event>) {
     setEvents((current) => current.map((event) => (event.id === id ? { ...event, ...patch } : event)));
@@ -1047,6 +1142,30 @@ function App() {
     setCategoryFilters((current) => current.filter((category) => category !== targetCategory));
   }
 
+  function deleteEventGenre(targetGenre: string) {
+    if (!window.confirm(`本当に「${targetGenre}」を出来事小カテゴリから削除しますか？`)) return;
+    setEvents((current) =>
+      current.map((event) => ({
+        ...event,
+        genres: (event.genres ?? []).filter((candidate) => candidate !== targetGenre),
+      })),
+    );
+    setPeople((current) =>
+      current.map((person) => ({
+        ...person,
+        genres: (person.genres ?? []).filter((candidate) => candidate !== targetGenre),
+      })),
+    );
+    setTermCards((current) =>
+      current.map((term) => ({
+        ...term,
+        genres: (term.genres ?? []).filter((candidate) => candidate !== targetGenre),
+      })),
+    );
+    setCustomGenres((current) => current.filter((candidate) => candidate !== targetGenre));
+    setEventGenreFilters((current) => current.filter((genre) => genre !== targetGenre));
+  }
+
   function deletePersonCategory(targetCategory: string) {
     if (targetCategory === "all") return;
     if (!window.confirm(`本当に「${targetCategory}」を人物カテゴリから削除しますか？`)) return;
@@ -1102,7 +1221,7 @@ function App() {
       title: "新しい出来事",
       aliases: [],
       startDate: "1914-01-01",
-      category: "政治",
+      category: "イベント",
       relatedCountries: [],
       countryIds: [],
       regionIds: [],
@@ -1181,9 +1300,8 @@ function App() {
   function addCategory() {
     const next = newCategoryName.trim();
     if (!next) return;
-    setCustomCategories((current) => uniqueValues([...current, next]));
+    addEventCategoryFilter(next);
     setNewCategoryName("");
-    setCategoryFilters((current) => uniqueValues([...current, next]));
   }
 
   function addGenre() {
@@ -1197,6 +1315,33 @@ function App() {
       setCustomGenres((current) => uniqueValues([...current, next]));
     }
     setNewGenreName("");
+  }
+
+  function addEventCategoryFilter(value: string) {
+    const next = value.trim();
+    if (!next) return;
+    setCustomCategories((current) => uniqueValues([...current, next]));
+    setCategoryFilters((current) => uniqueValues([...current, next]));
+  }
+
+  function addEventGenreFilter(value: string) {
+    const next = value.trim();
+    if (!next) return;
+    setCustomGenres((current) => uniqueValues([...current, next]));
+    setEventGenreFilters((current) => uniqueValues([...current, next]));
+  }
+
+  function addPersonCategoryFilter(value: string) {
+    const next = value.trim();
+    if (!next) return;
+    setCustomGenres((current) => uniqueValues([...current, next]));
+    setPersonCategoryFilters((current) => uniqueValues([...current, next]));
+  }
+
+  function addCountryFilter(value: string) {
+    const id = resolveCountryInput(value);
+    if (!id) return;
+    setCountryFilters((current) => uniqueValues([...current, id]));
   }
 
   function addCountry() {
@@ -1268,8 +1413,7 @@ function App() {
       <section className="workspace">
         <aside className={`control-panel ${mobileFiltersOpen ? "mobile-open" : ""}`} aria-label="検索条件">
           <div className="panel-title">
-            <span className="brand-mark">Darius</span>
-            <span className="brand-beta">β</span>
+            <span className="brand-mark">歴史DB</span>
           </div>
 
           <div className="view-tabs" role="tablist" aria-label="表示ビュー">
@@ -1300,11 +1444,7 @@ function App() {
 
         <section className="database-area">
           <div className="top-bar">
-            <div className="header-block">
-              <p>歴史年表DB プロトタイプ</p>
-              <h1>第一次世界大戦</h1>
-              <span className="save-status">{saveStatus}</span>
-            </div>
+            <span className="save-status">{saveStatus}</span>
             <div className="top-search-filter">
               <label className="top-search-box">
                 <Search size={15} />
@@ -1363,17 +1503,26 @@ function App() {
                 label="出来事カテゴリ"
                 values={categoryFilters}
                 onChange={(values) => setCategoryFilters(values as Category[])}
-                onDelete={deleteEventCategory}
                 options={categories
                   .filter((value, index, array) => array.indexOf(value) === index)
                   .map((candidate) => ({ value: candidate, label: candidate }))}
                 placeholder="出来事カテゴリを検索"
               />
               <FilterSearchSelect
+                label="出来事小カテゴリ"
+                values={eventGenreFilters}
+                onChange={setEventGenreFilters}
+                onDelete={deleteEventGenre}
+                onCreate={addEventGenreFilter}
+                options={eventGenres.map((candidate) => ({ value: candidate, label: candidate }))}
+                placeholder="出来事小カテゴリを検索"
+              />
+              <FilterSearchSelect
                 label="人物カテゴリ"
                 values={personCategoryFilters}
                 onChange={setPersonCategoryFilters}
                 onDelete={deletePersonCategory}
+                onCreate={addPersonCategoryFilter}
                 options={personCategories
                   .filter((value, index, array) => array.indexOf(value) === index)
                   .map((candidate) => ({ value: candidate, label: candidate }))}
@@ -1384,6 +1533,7 @@ function App() {
                 values={countryFilters}
                 onChange={setCountryFilters}
                 onDelete={deleteCountry}
+                onCreate={addCountryFilter}
                 options={countries.map((candidate) => ({ value: candidate.id, label: candidate.name }))}
                 placeholder="国を検索"
               />
@@ -1392,6 +1542,7 @@ function App() {
                 type="button"
                 onClick={() => {
                   setCategoryFilters([]);
+                  setEventGenreFilters([]);
                   setPersonCategoryFilters([]);
                   setCountryFilters([]);
                   setSearchQuery("");
@@ -1527,6 +1678,7 @@ function TimelineView({
   const timelineBoardRef = useRef<HTMLDivElement | null>(null);
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineScrollMax, setTimelineScrollMax] = useState(0);
+  const [timelineClientWidth, setTimelineClientWidth] = useState(800);
   const eventYears = items.flatMap((item) => [
     getTimelineYearPosition(item.startDate),
     item.endDate ? getTimelineYearPosition(item.endDate) : getTimelineYearPosition(item.startDate),
@@ -1547,7 +1699,7 @@ function TimelineView({
   );
   const countryLanes =
     laneMode === "plain"
-        ? ["出来事"]
+        ? sortEventCategories(Array.from(new Set(items.map((item) => item.category || "未分類"))))
         : countriesFilter.length > 0
           ? countriesFilter
           : Array.from(new Set(items.flatMap((item) => (getRecordCountryIds(item).length ? getRecordCountryIds(item) : ["unclassified"])))).slice(0, 20);
@@ -1568,7 +1720,7 @@ function TimelineView({
     const placements = items.flatMap((item) => {
       const targetCountries =
         laneMode === "plain"
-          ? ["出来事"]
+          ? [item.category || "未分類"]
           : countriesFilter.length > 0
             ? countriesFilter
             : getRecordCountryIds(item).length
@@ -1579,13 +1731,15 @@ function TimelineView({
         .map((targetCountry) => {
           const left = positionPercent(item.startDate);
           const right = item.endDate ? positionPercent(item.endDate) : left;
+          const titleVisualWidth = Math.min(34, Math.max(4, ((item.title.length * 13 + 64) / Math.max(timelinePixelWidth, 1)) * 100));
+          const dateVisualWidth = item.displayType === "Point" ? 8 : Math.max(right - left, 0.08);
           return {
             item,
             lane: Math.max(0, countryLanes.indexOf(targetCountry)),
             country: targetCountry,
             left,
             width: item.displayType === "Point" ? 0.08 : Math.max(right - left, 0.001),
-            visualWidth: item.displayType === "Point" ? 8 : Math.max(right - left, 0.08),
+            visualWidth: Math.max(dateVisualWidth, titleVisualWidth),
             stack: 0,
           };
         });
@@ -1595,8 +1749,8 @@ function TimelineView({
       .sort((a, b) => a.lane - b.lane || a.left - b.left)
       .forEach((placement) => {
         const stacks = stacksByLane.get(placement.lane) ?? [];
-        const visualWidth = Math.max(placement.visualWidth, Math.min(18, 1400 / Math.max(timelinePixelWidth, 1)));
-        const stack = stacks.findIndex((end) => placement.left > end + 0.25);
+        const visualWidth = placement.visualWidth;
+        const stack = stacks.findIndex((end) => placement.left > end + 0.8);
         const nextStack = stack === -1 ? stacks.length : stack;
         placement.stack = nextStack;
         stacks[nextStack] = placement.left + visualWidth;
@@ -1605,7 +1759,37 @@ function TimelineView({
     return placements;
   })();
 
-  const maxEventStack = Math.max(0, ...eventPlacements.map((placement) => placement.stack));
+  const viewportMinYear = minYear + (timelineScrollLeft / Math.max(timelinePixelWidth, 1)) * span;
+  const viewportMaxYear = viewportMinYear + (timelineClientWidth / Math.max(timelinePixelWidth, 1)) * span;
+
+  const isPlacementVisible = (placement: EventPlacement) => {
+    const itemStart = getTimelineYearPosition(placement.item.startDate);
+    const itemEnd = placement.item.endDate ? getTimelineYearPosition(placement.item.endDate) : itemStart;
+    return itemStart <= viewportMaxYear + 2 && itemEnd >= viewportMinYear - 2;
+  };
+
+  const maxStackByLane = new Map<number, number>();
+  eventPlacements.forEach((placement) => {
+    if (isPlacementVisible(placement)) {
+      const current = maxStackByLane.get(placement.lane) ?? -1;
+      maxStackByLane.set(placement.lane, Math.max(current, placement.stack));
+    }
+  });
+
+  const laneRowHeights: number[] = [];
+  const laneTops: number[] = [];
+  let currentTop = eraHeight;
+  for (let i = 0; i < countryLanes.length; i++) {
+    laneTops.push(currentTop);
+    const stack = maxStackByLane.get(i) ?? -1;
+    const laneHeight = stack === -1 
+      ? 0 
+      : Math.max(80, Math.round((70 + stack * 34) * heightZoom));
+    laneRowHeights.push(laneHeight);
+    currentTop += laneHeight;
+  }
+  const totalCountryLanesHeight = currentTop - eraHeight;
+
   const personPlacements = people
     .map((person) => {
       const left = positionPercent(getPersonBirthDate(person));
@@ -1627,11 +1811,10 @@ function TimelineView({
     personStackEnds[nextStack] = placement.left + placement.visualWidth;
   });
   const personStackCount = Math.max(1, personStackEnds.length);
-  const rowHeight = Math.max(116, Math.round((104 + maxEventStack * 32) * heightZoom));
   const personRowHeight = Math.max(140, Math.round((68 + personStackCount * 26) * heightZoom));
 
   function rowTop(lane: number) {
-    return eraHeight + lane * rowHeight;
+    return laneTops[lane];
   }
 
   function zoomBy(factor: number, viewportX?: number) {
@@ -1683,6 +1866,7 @@ function TimelineView({
     if (!element) return;
     setTimelineScrollLeft(element.scrollLeft);
     setTimelineScrollMax(Math.max(0, element.scrollWidth - element.clientWidth));
+    setTimelineClientWidth(element.clientWidth);
   }
 
   useLayoutEffect(() => {
@@ -1703,7 +1887,7 @@ function TimelineView({
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", updateTimelineScrollState);
     };
-  }, [timelinePixelWidth, rowHeight, personRowHeight, eraHeight, countryLanes.length]);
+  }, [timelinePixelWidth]);
 
   if (!hasTimelineData) {
     return (
@@ -1729,7 +1913,7 @@ function TimelineView({
       style={
         {
           "--timeline-width": `${Math.round(timelinePixelWidth)}px`,
-          "--row-height": `${rowHeight}px`,
+          "--total-country-lanes-height": `${totalCountryLanesHeight}px`,
           "--person-row-height": `${personRowHeight}px`,
           "--era-height": `${eraHeight}px`,
         } as CSSProperties
@@ -1745,7 +1929,7 @@ function TimelineView({
 
       <div className="timeline-grid" style={{ "--country-rows": countryLanes.length } as CSSProperties}>
         <div className="lane-canvas">
-          <div className="timeline-tick-lines" aria-hidden="true">
+          <div className="timeline-tick-lines" aria-hidden="true" style={{ bottom: 0, height: eraHeight + totalCountryLanesHeight + personRowHeight }}>
             {yearTicks.map((year) => (
               <span key={year} style={{ "--left": `${positionYearPercent(year)}%` } as CSSProperties} />
             ))}
@@ -1788,13 +1972,20 @@ function TimelineView({
               })}
             </div>
           )}
-          {countryLanes.map((lane, index) => (
-            <div className="country-lane" key={lane} style={{ "--lane": index, "--era-height": `${eraHeight}px` } as CSSProperties} />
-          ))}
-          <div className="person-lane" style={{ "--lane-top": `${eraHeight + countryLanes.length * rowHeight}px` } as CSSProperties} />
+          {countryLanes.map((lane, index) => {
+            const laneHeight = laneRowHeights[index];
+            if (laneHeight === 0) return null;
+            return (
+              <div className="country-lane" key={lane} style={{ "--lane-top": `${laneTops[index]}px`, "--lane-height": `${laneHeight}px` } as CSSProperties}>
+                {laneMode !== "plain" && <span className="lane-label-text">{lane}</span>}
+              </div>
+            );
+          })}
+          <div className="person-lane" style={{ "--lane-top": `${eraHeight + totalCountryLanesHeight}px`, height: `${personRowHeight}px` } as CSSProperties} />
 
           {eventPlacements.map((placement) => {
             const { item } = placement;
+            const categoryColor = getEventCategoryColor(item.category);
             return (
               <button
                 className={`timeline-card ${item.displayType.toLowerCase()}`}
@@ -1804,7 +1995,10 @@ function TimelineView({
                   {
                     "--left": `${placement.left}%`,
                     "--width": `${placement.width}%`,
-                    "--top": `${rowTop(placement.lane) + rowHeight / 2 - 20 + placement.stack * 34}px`,
+                    "--top": `${rowTop(placement.lane) + laneRowHeights[placement.lane] / 2 - 20 + placement.stack * 34}px`,
+                    "--event-color": categoryColor.background,
+                    "--event-mark": categoryColor.mark,
+                    "--event-text": categoryColor.text,
                   } as CSSProperties
                 }
                 type="button"
@@ -1835,7 +2029,7 @@ function TimelineView({
                     "--left": `${placement.left}%`,
                     "--width": `${placement.width}%`,
                     "--offset": placement.stack,
-                    "--top": `${eraHeight + countryLanes.length * rowHeight + 34 + placement.stack * 28}px`,
+                    "--top": `${eraHeight + totalCountryLanesHeight + 34 + placement.stack * 28}px`,
                   } as CSSProperties
                 }
                 type="button"
@@ -1853,23 +2047,6 @@ function TimelineView({
           })}
         </div>
       </div>
-      {timelineScrollMax > 0 && (
-        <div className="timeline-scroll-control">
-          <input
-            aria-label="年表の横移動"
-            max={timelineScrollMax}
-            min={0}
-            type="range"
-            value={Math.min(timelineScrollLeft, timelineScrollMax)}
-            onChange={(event) => {
-              const nextLeft = Number(event.target.value);
-              const element = timelineBoardRef.current;
-              if (element) element.scrollLeft = nextLeft;
-              setTimelineScrollLeft(nextLeft);
-            }}
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -2392,6 +2569,7 @@ function FilterSearchSelect({
   placeholder,
   onChange,
   onDelete,
+  onCreate,
 }: {
   label: string;
   values: string[];
@@ -2399,6 +2577,7 @@ function FilterSearchSelect({
   placeholder: string;
   onChange: (values: string[]) => void;
   onDelete?: (value: string) => void;
+  onCreate?: (value: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -2408,6 +2587,10 @@ function FilterSearchSelect({
     .filter(Boolean);
   const selectedLabel = selectedLabels.length === 0 ? "すべて" : selectedLabels.join("、");
   const filteredOptions = options.filter((option) => matchesSearch(option.label, query));
+  const trimmedQuery = query.trim();
+  const canCreate =
+    Boolean(onCreate && trimmedQuery) &&
+    !options.some((option) => normalizeLocationName(option.label) === normalizeLocationName(trimmedQuery));
 
   useEffect(() => {
     if (!open) return;
@@ -2442,9 +2625,27 @@ function FilterSearchSelect({
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") setOpen(false);
+              if (event.key === "Enter" && canCreate) {
+                event.preventDefault();
+                onCreate?.(trimmedQuery);
+                setQuery("");
+              }
             }}
             placeholder={placeholder}
           />
+          {canCreate && (
+            <button
+              className="filter-create-button"
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onCreate?.(trimmedQuery);
+                setQuery("");
+              }}
+            >
+              「{trimmedQuery}」を追加
+            </button>
+          )}
           <div className="filter-search-options">
             <div className={values.length === 0 ? "filter-search-option active" : "filter-search-option"}>
               <button
@@ -2556,7 +2757,7 @@ function ChipEditor({
         {options && (
           <datalist id={listId}>
             {options.map((option) => (
-              <option key={option.value} value={option.label} />
+              <option key={option.value} value={option.label}>{option.label}</option>
             ))}
           </datalist>
         )}
@@ -2769,6 +2970,84 @@ function getLearningFileType(file: File): LearningFile["type"] {
   return "file";
 }
 
+function dataUrlToBlob(dataUrl: string, fallbackMimeType: string) {
+  const [header, body] = dataUrl.split(",");
+  if (!body) throw new Error("Invalid file data");
+  const mimeType = header.match(/data:([^;]+)/)?.[1] || fallbackMimeType || "application/octet-stream";
+  const binary = header.includes(";base64") ? window.atob(body) : decodeURIComponent(body);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
+async function loadPdfJs() {
+  if (!pdfJsModulePromise) {
+    const pdfJsUrl = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
+    pdfJsModulePromise = import(/* @vite-ignore */ pdfJsUrl);
+  }
+  const pdfjs = await pdfJsModulePromise;
+  pdfjs.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
+  return pdfjs;
+}
+
+function LearningPdfPreview({ file }: { file: LearningFile }) {
+  const [slideUrls, setSlideUrls] = useState<string[]>([]);
+  const [status, setStatus] = useState("PDFをスライドとして読み込んでいます");
+
+  useEffect(() => {
+    let canceled = false;
+
+    async function renderSlides() {
+      setSlideUrls([]);
+      setStatus("PDFをスライドとして読み込んでいます");
+      try {
+        const pdfjs = await loadPdfJs();
+        const pdfBlob = dataUrlToBlob(file.dataUrl, file.mimeType);
+        const pdfData = new Uint8Array(await pdfBlob.arrayBuffer());
+        const pdf = await pdfjs.getDocument({ data: pdfData }).promise;
+        const renderedSlides: string[] = [];
+
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          if (canceled) return;
+          const page = await pdf.getPage(pageNumber);
+          const baseViewport = page.getViewport({ scale: 1 });
+          const targetWidth = 1440;
+          const scale = Math.max(1.2, targetWidth / baseViewport.width);
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+          if (!context) continue;
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          await page.render({ canvasContext: context, viewport }).promise;
+          renderedSlides.push(canvas.toDataURL("image/png"));
+          setSlideUrls([...renderedSlides]);
+        }
+
+        if (!canceled) setStatus(renderedSlides.length > 0 ? "" : "PDFからスライドを読み取れませんでした");
+      } catch {
+        if (!canceled) setStatus("PDFをスライドとして読み取れませんでした");
+      }
+    }
+
+    renderSlides();
+    return () => {
+      canceled = true;
+    };
+  }, [file.dataUrl, file.mimeType]);
+
+  return (
+    <div className="learning-slide-preview">
+      {slideUrls.map((slideUrl, index) => (
+        <img alt={`${file.name} ${index + 1}ページ`} key={`${file.id}-${index}`} src={slideUrl} />
+      ))}
+      {status && <p>{status}</p>}
+    </div>
+  );
+}
+
 function LearningFilesView({ files, onDelete }: { files?: LearningFile[]; onDelete?: (id: string) => void }) {
   const visibleFiles = files ?? [];
   if (visibleFiles.length === 0) {
@@ -2779,25 +3058,19 @@ function LearningFilesView({ files, onDelete }: { files?: LearningFile[]; onDele
     <div className="learning-file-list">
       {visibleFiles.map((file) => (
         <article className="learning-file-card" key={file.id}>
-          <div className="learning-file-meta">
-            <strong>{file.name}</strong>
-            {onDelete && (
-              <button type="button" onClick={() => onDelete(file.id)}>
-                削除
-              </button>
-            )}
-          </div>
-          {file.type === "audio" && <audio controls src={file.dataUrl} />}
-          {file.type === "image" && <img src={file.dataUrl} alt={file.name} />}
-          {file.type === "pdf" && (
-            <div className="learning-pdf-preview">
-              <object data={file.dataUrl} type="application/pdf" aria-label={file.name}>
-                <a href={file.dataUrl} target="_blank" rel="noreferrer">
-                  PDFを開く
-                </a>
-              </object>
+          {(file.type !== "pdf" || onDelete) && (
+            <div className="learning-file-meta">
+              {file.type !== "pdf" && <strong>{file.name}</strong>}
+              {onDelete && (
+                <button type="button" onClick={() => onDelete(file.id)}>
+                  削除
+                </button>
+              )}
             </div>
           )}
+          {file.type === "audio" && <audio controls src={file.dataUrl} />}
+          {file.type === "image" && <img src={file.dataUrl} alt={file.name} />}
+          {file.type === "pdf" && <LearningPdfPreview file={file} />}
           {file.type === "file" && (
             <a href={file.dataUrl} download={file.name}>
               ファイルを開く
@@ -3211,7 +3484,7 @@ function DetailPanel({
       </div>
       <datalist id="genre-options">
         {genres.map((genre) => (
-          <option key={genre} value={genre} />
+          <option key={genre} value={genre}>{genre}</option>
         ))}
       </datalist>
 
@@ -3255,7 +3528,7 @@ function DetailPanel({
                 </span>
               </div>
             )}
-            <HashtagList values={event.genres} />
+            <HashtagList values={[event.category, ...(event.genres ?? [])]} />
             <div className="person-preview-tabs">
               {[
                 ["summary", "まとめ"],
@@ -3328,20 +3601,17 @@ function DetailPanel({
               </div>
               <label>
                 カテゴリ
-                <input
-                  list="event-category-options"
+                <select
                   value={event.category}
-                  onChange={(input) => onUpdateEvent(event.id, { category: input.target.value as Category })}
-                  placeholder="例: 宗教"
-                />
-                <datalist id="event-category-options">
+                  onChange={(input) => onUpdateEvent(event.id, { category: normalizeEventCategory(input.target.value) })}
+                >
                   {categories.map((category) => (
-                    <option key={category} value={category} />
+                    <option key={category} value={category}>{category}</option>
                   ))}
-                </datalist>
+                </select>
               </label>
               <ChipEditor
-                label="ジャンル"
+                label="小カテゴリ"
                 values={event.genres ?? []}
                 onChange={(values) => onUpdateEvent(event.id, { genres: values })}
                 options={genres.map((genre) => ({ value: genre, label: genre }))}
@@ -3609,7 +3879,7 @@ function DetailPanel({
                 </small>
               </div>
             </div>
-            <HashtagList values={term.genres} />
+            <HashtagList values={[term.category, ...(term.genres ?? [])]} />
             <div className="person-preview-tabs">
               {[
                 ["summary", "まとめ"],

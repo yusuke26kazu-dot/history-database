@@ -23,11 +23,16 @@ export default async (request) => {
 
   if (request.method === "PUT") {
     const body = await request.json();
+    const previousData = await store.get("main", { type: "json" });
+    const savedAt = new Date().toISOString();
+    if (previousData) {
+      await store.setJSON(`backups/${savedAt}`, previousData);
+    }
     await store.setJSON("main", {
       ...body,
-      savedAt: new Date().toISOString(),
+      savedAt,
     });
-    return jsonResponse(200, { ok: true });
+    return jsonResponse(200, { ok: true, savedAt });
   }
 
   return jsonResponse(405, { error: "Method not allowed" });
