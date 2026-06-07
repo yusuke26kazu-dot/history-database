@@ -3,6 +3,7 @@ export type Category = string;
 export type Person = {
   id: string;
   name: string;
+  aliases?: string[];
   birthYear: number;
   deathYear: number;
   birthDate?: string;
@@ -11,15 +12,19 @@ export type Person = {
   regionIds?: string[];
   affiliations: string[];
   summary: string;
+  majorWorks?: string[];
+  episodeBlocks?: ContentBlock[];
   contentBlocks?: ContentBlock[];
   genres?: string[];
   imageUrls?: string[];
   references?: string[];
+  learningFiles?: LearningFile[];
 };
 
 export type Event = {
   id: string;
   title: string;
+  aliases?: string[];
   startDate: string;
   endDate?: string;
   category: Category;
@@ -36,6 +41,7 @@ export type Event = {
   genres?: string[];
   imageUrls?: string[];
   references?: string[];
+  learningFiles?: LearningFile[];
 };
 
 export type PersonEvent = {
@@ -56,13 +62,22 @@ export type TermCard = {
   genres?: string[];
   imageUrls?: string[];
   references?: string[];
+  learningFiles?: LearningFile[];
 };
 
 export type ContentBlock = {
   id: string;
-  type: "paragraph" | "heading" | "subheading" | "quote" | "image" | "video";
+  type: "paragraph" | "heading" | "subheading" | "quote" | "image" | "video" | "html";
   text: string;
   caption?: string;
+};
+
+export type LearningFile = {
+  id: string;
+  name: string;
+  type: "audio" | "image" | "pdf" | "file";
+  mimeType: string;
+  dataUrl: string;
 };
 
 export type EraPeriod = {

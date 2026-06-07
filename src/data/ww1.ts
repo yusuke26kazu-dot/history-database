@@ -9,6 +9,7 @@ export const countries: Country[] = [
   { id: "uk", name: "イギリス" },
   { id: "usa", name: "アメリカ合衆国", aliases: ["アメリカ"] },
   { id: "ancient-greece", name: "古代ギリシア" },
+  { id: "prussia", name: "プロイセン", aliases: ["東プロイセン"] },
 ];
 
 export const regions: Region[] = [
@@ -24,6 +25,7 @@ export const regions: Region[] = [
   { id: "washington-dc", countryId: "usa", name: "ワシントンD.C.", latitude: 38.9072, longitude: -77.0369 },
   { id: "athens", countryId: "ancient-greece", name: "アテナイ", latitude: 37.9838, longitude: 23.7275 },
   { id: "sparta", countryId: "ancient-greece", name: "スパルタ", latitude: 37.0745, longitude: 22.4301 },
+  { id: "konigsberg", countryId: "prussia", name: "ケーニヒスベルク", latitude: 54.7104, longitude: 20.4522, note: "イマヌエル・カントの出生地・活動地" },
 ];
 
 export const people: Person[] = [
@@ -116,6 +118,41 @@ export const people: Person[] = [
     regionIds: ["athens"],
     affiliations: ["アテナイ", "古代ギリシア"],
     summary: "古代アテナイの喜劇作家。『雲』でソクラテスを風刺的に描いた。",
+  },
+  {
+    id: "immanuel-kant",
+    name: "イマヌエル・カント",
+    aliases: ["カント", "Kant", "Immanuel Kant"],
+    birthYear: 1724,
+    deathYear: 1804,
+    birthDate: "1724-04-22",
+    deathDate: "1804-02-12",
+    countryIds: ["prussia"],
+    regionIds: ["konigsberg"],
+    affiliations: ["哲学者", "啓蒙思想", "ドイツ観念論", "批判哲学"],
+    genres: ["哲学者", "啓蒙思想", "ドイツ観念論", "批判哲学"],
+    summary: "近代哲学を大きく転換したプロイセンの哲学者。認識、道徳、美学を体系的に論じた。",
+    majorWorks: ["純粋理性批判", "実践理性批判", "判断力批判", "永遠平和のために"],
+    contentBlocks: [
+      {
+        id: "kant-summary-html",
+        type: "html",
+        text:
+          "<p>カントは、経験と理性の関係を問い直し、人間が世界をどのように認識するのかを体系化した哲学者である。</p><p>彼の批判哲学は、近代以降の認識論、倫理学、美学、政治思想に大きな影響を与えた。</p>",
+      },
+    ],
+    episodeBlocks: [
+      {
+        id: "kant-episode-html",
+        type: "html",
+        text:
+          "<p>生涯の大半をケーニヒスベルクで過ごしたことで知られる。規則正しい生活を送ったという逸話が多く、思索の深さと生活の几帳面さの両方で語られる人物である。</p>",
+      },
+    ],
+    imageUrls: [
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 520'%3E%3Crect width='400' height='520' fill='%23e7ded0'/%3E%3Crect x='42' y='42' width='316' height='436' rx='18' fill='%23272b2f'/%3E%3Ccircle cx='200' cy='158' r='76' fill='%23d8bca1'/%3E%3Cpath d='M116 152c22-76 146-76 168 0-28-26-140-26-168 0z' fill='%23f2f2ee'/%3E%3Cpath d='M105 388c18-86 55-132 95-132s77 46 95 132' fill='%236d5548'/%3E%3Cpath d='M142 300h116l24 120H118z' fill='%23928f86'/%3E%3Ctext x='200' y='465' text-anchor='middle' font-family='serif' font-size='34' font-weight='700' fill='%23f7f3eb'%3EKant%3C/text%3E%3C/svg%3E",
+    ],
+    references: ["『純粋理性批判』", "『実践理性批判』", "『判断力批判』"],
   },
 ];
 
@@ -235,8 +272,8 @@ export const events: Event[] = [
   {
     id: "peloponnesian-war",
     title: "ペロポネソス戦争",
-    startDate: "-0430-01-01",
-    endDate: "-0403-12-31",
+    startDate: "-0430",
+    endDate: "-0403",
     category: "戦争",
     relatedCountries: ["アテナイ", "スパルタ", "古代ギリシア"],
     countryIds: ["ancient-greece"],
@@ -249,7 +286,7 @@ export const events: Event[] = [
   {
     id: "aristophanes-clouds",
     title: "アリストファネス『雲』上演",
-    startDate: "-0422-01-01",
+    startDate: "-0422",
     category: "思想",
     relatedCountries: ["アテナイ", "古代ギリシア"],
     countryIds: ["ancient-greece"],
@@ -265,7 +302,7 @@ export const events: Event[] = [
   {
     id: "trial-of-socrates",
     title: "ソクラテス裁判",
-    startDate: "-0398-01-01",
+    startDate: "-0398",
     category: "裁判",
     relatedCountries: ["アテナイ", "古代ギリシア"],
     countryIds: ["ancient-greece"],
@@ -339,6 +376,46 @@ export const termCards: TermCard[] = [
     aliases: ["July Crisis"],
     relatedTerms: ["サラエボ事件", "第一次世界大戦", "オーストリア＝ハンガリー帝国", "セルビア"],
   },
+  {
+    id: "work-critique-pure-reason",
+    term: "純粋理性批判",
+    category: "著作",
+    summary: "カントの主著。人間の認識がどのように成立するかを検討した。",
+    detail: "『純粋理性批判』は、経験に先立つ認識の条件を問い、近代哲学の大きな転換点となった著作である。",
+    aliases: ["Critique of Pure Reason"],
+    relatedTerms: ["イマヌエル・カント", "批判哲学", "認識論"],
+    genres: ["著作", "哲学"],
+  },
+  {
+    id: "work-critique-practical-reason",
+    term: "実践理性批判",
+    category: "著作",
+    summary: "道徳法則と実践理性を論じたカント倫理学の中心的著作。",
+    detail: "『実践理性批判』は、人間がどのように道徳的に行為できるかを、理性と自由の問題として考察した。",
+    aliases: ["Critique of Practical Reason"],
+    relatedTerms: ["イマヌエル・カント", "定言命法", "倫理学"],
+    genres: ["著作", "哲学"],
+  },
+  {
+    id: "work-critique-judgment",
+    term: "判断力批判",
+    category: "著作",
+    summary: "美や崇高、目的論的判断を扱ったカント三批判の一つ。",
+    detail: "『判断力批判』は、美学と自然目的論を通じて、認識と実践の領域をつなぐ判断力を論じた。",
+    aliases: ["Critique of Judgment"],
+    relatedTerms: ["イマヌエル・カント", "美学", "崇高"],
+    genres: ["著作", "哲学"],
+  },
+  {
+    id: "work-perpetual-peace",
+    term: "永遠平和のために",
+    category: "著作",
+    summary: "国際平和の条件を論じたカントの政治哲学的著作。",
+    detail: "『永遠平和のために』は、共和制、国際法、世界市民法などを通じて恒久平和の条件を考えた小論である。",
+    aliases: ["Perpetual Peace"],
+    relatedTerms: ["イマヌエル・カント", "国際法", "平和思想"],
+    genres: ["著作", "政治思想"],
+  },
 ];
 
 export const eraPeriods: EraPeriod[] = [
@@ -353,6 +430,9 @@ export const eraPeriods: EraPeriod[] = [
   { id: "jp-edo", group: "日本", name: "江戸", startYear: 1603, endYear: 1868, color: "#edf8e8" },
   { id: "jp-meiji", group: "日本", name: "明治", startYear: 1868, endYear: 1912, color: "#eaf4ff" },
   { id: "jp-taisho", group: "日本", name: "大正", startYear: 1912, endYear: 1926, color: "#fff4dc" },
+  { id: "jp-showa", group: "日本", name: "昭和", startYear: 1926, endYear: 1989, color: "#f0f7ff" },
+  { id: "jp-heisei", group: "日本", name: "平成", startYear: 1989, endYear: 2019, color: "#f5edff" },
+  { id: "jp-reiwa", group: "日本", name: "令和", startYear: 2019, endYear: 2026, color: "#e9f8f4" },
 
   { id: "cn-spring-autumn", group: "中国", name: "春秋", startYear: -770, endYear: -476, color: "#f1f7e9" },
   { id: "cn-warring-states", group: "中国", name: "戦国", startYear: -475, endYear: -221, color: "#ffece2" },
@@ -360,11 +440,20 @@ export const eraPeriods: EraPeriod[] = [
   { id: "cn-han", group: "中国", name: "漢", startYear: -206, endYear: 220, color: "#eaf4ff" },
   { id: "cn-three-kingdoms", group: "中国", name: "三国", startYear: 220, endYear: 280, color: "#fff3d6" },
   { id: "cn-jin", group: "中国", name: "晋", startYear: 265, endYear: 420, color: "#eaf7ef" },
+  { id: "cn-northern-southern", group: "中国", name: "南北朝", startYear: 420, endYear: 581, color: "#fff7e8" },
   { id: "cn-sui", group: "中国", name: "隋", startYear: 581, endYear: 618, color: "#f0f0ff" },
   { id: "cn-tang", group: "中国", name: "唐", startYear: 618, endYear: 907, color: "#fff0ea" },
+  { id: "cn-five-dynasties", group: "中国", name: "五代十国", startYear: 907, endYear: 960, color: "#f7f2e8" },
   { id: "cn-song", group: "中国", name: "宋", startYear: 960, endYear: 1279, color: "#e9f7ff" },
   { id: "cn-yuan", group: "中国", name: "元", startYear: 1271, endYear: 1368, color: "#edf8e8" },
   { id: "cn-ming", group: "中国", name: "明", startYear: 1368, endYear: 1644, color: "#fff5d9" },
   { id: "cn-qing", group: "中国", name: "清", startYear: 1644, endYear: 1912, color: "#eaf0ff" },
   { id: "cn-republic", group: "中国", name: "中華民国", startYear: 1912, endYear: 1949, color: "#f7edff" },
+  { id: "cn-prc", group: "中国", name: "中華人民共和国", startYear: 1949, endYear: 2026, color: "#edf7f1" },
+
+  { id: "world-ancient", group: "世界史", name: "古代", startYear: -3000, endYear: 476, color: "#edf7ff" },
+  { id: "world-medieval", group: "世界史", name: "中世", startYear: 476, endYear: 1453, color: "#f1f7e9" },
+  { id: "world-early-modern", group: "世界史", name: "近世", startYear: 1453, endYear: 1789, color: "#fff3d8" },
+  { id: "world-modern", group: "世界史", name: "近代", startYear: 1789, endYear: 1945, color: "#ffece8" },
+  { id: "world-contemporary", group: "世界史", name: "現代", startYear: 1945, endYear: 2026, color: "#eef0ff" },
 ];

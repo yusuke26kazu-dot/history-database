@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -12,8 +12,6 @@ import {
   RotateCcw,
   Search,
   UserRound,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import {
   eraPeriods as seedEraPeriods,
@@ -24,20 +22,25 @@ import {
   regions as seedRegions,
   termCards as seedTermCards,
 } from "./data/ww1";
-import type { Category, ContentBlock, Country, EditableRecord, EraPeriod, Event, Person, Region, TermCard, TimelineItem } from "./models";
-import { buildTimelineItems, filterTimelineItems, getHistoricalYear } from "./query";
+import type { Category, ContentBlock, Country, EditableRecord, EraPeriod, Event, LearningFile, Person, Region, TermCard, TimelineItem } from "./models";
+import { buildTimelineItems, getHistoricalYear } from "./query";
 
-type ViewMode = "timeline" | "category" | "people" | "cards" | "map";
+type ViewMode = "timeline" | "map" | "category" | "people" | "terms" | "cards";
 type TimelineLaneMode = "country" | "plain";
+type CardGroupMode = "all" | "category" | "country";
 type TermPopup = { term: string; definition: string; target?: EditableRecord };
 type KnowledgeCard = {
   id: string;
   type: EditableRecord["type"];
   title: string;
+  aliases?: string[];
   label: string;
   summary: string;
   meta: string;
   searchText: string;
+  groupCategory?: string;
+  countryIds?: string[];
+  tags?: string[];
 };
 type EventMapPin = {
   item: TimelineItem;
@@ -74,11 +77,12 @@ type EventPlacement = {
 const baseCategories: Category[] = ["戦争", "外交", "暗殺", "政治", "革命", "講和", "思想", "裁判"];
 const baseTermCategories = ["用語", "概念", "地域", "史料"];
 const viewModes: Array<{ id: ViewMode; label: string; icon: typeof Rows3 }> = [
-  { id: "timeline", label: "タイムライン", icon: Rows3 },
-  { id: "category", label: "カテゴリ", icon: ListTree },
-  { id: "people", label: "人物", icon: UserRound },
-  { id: "cards", label: "全カード", icon: Library },
+  { id: "timeline", label: "年表", icon: Rows3 },
   { id: "map", label: "地図", icon: MapPin },
+  { id: "category", label: "出来事", icon: ListTree },
+  { id: "people", label: "人物", icon: UserRound },
+  { id: "terms", label: "単語", icon: Library },
+  { id: "cards", label: "全カード", icon: Library },
 ];
 
 const countryFlags: Record<string, string> = {
@@ -155,6 +159,9 @@ function toLabelDate(value: string) {
   const year = getHistoricalYear(value);
   if (!String(value ?? "").trim() || !Number.isFinite(year)) {
     return "未設定";
+  }
+  if (parts?.precision === "year") {
+    return `${toDisplayYear(parts.year)}年`;
   }
   if (parts && parts.year < 1) {
     return `紀元前${Math.abs(parts.year) + 1}年${parts.month}月${parts.day}日`;
@@ -257,15 +264,21 @@ type HistoricalDateParts = {
   year: number;
   month: number;
   day: number;
+  precision?: "year" | "day";
 };
 
 function padDatePart(value: number, length = 2) {
   return String(Math.abs(value)).padStart(length, "0");
 }
 
-function serializeHistoricalDate({ year, month, day }: HistoricalDateParts) {
+function serializeHistoricalYear(year: number) {
   const yearPrefix = year < 0 ? "-" : "";
-  return `${yearPrefix}${padDatePart(year, 4)}-${padDatePart(month)}-${padDatePart(day)}`;
+  return `${yearPrefix}${padDatePart(year, 4)}`;
+}
+
+function serializeHistoricalDate({ year, month, day, precision }: HistoricalDateParts) {
+  if (precision === "year") return serializeHistoricalYear(year);
+  return `${serializeHistoricalYear(year)}-${padDatePart(month)}-${padDatePart(day)}`;
 }
 
 function parseHistoricalDateParts(value: string | undefined): HistoricalDateParts | null {
@@ -282,6 +295,7 @@ function parseHistoricalDateParts(value: string | undefined): HistoricalDatePart
       year: -(Number(beforeCommonEraMatch[1]) - 1),
       month: beforeCommonEraMatch[2] ? Number(beforeCommonEraMatch[2]) : 1,
       day: beforeCommonEraMatch[3] ? Number(beforeCommonEraMatch[3]) : 1,
+      precision: beforeCommonEraMatch[2] || beforeCommonEraMatch[3] ? "day" : "year",
     };
   }
   const match = normalized.match(/^(-?\d{1,6})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/);
@@ -290,6 +304,7 @@ function parseHistoricalDateParts(value: string | undefined): HistoricalDatePart
     year: Number(match[1]),
     month: match[2] ? Number(match[2]) : 1,
     day: match[3] ? Number(match[3]) : 1,
+    precision: match[2] || match[3] ? "day" : "year",
   };
 }
 
@@ -300,6 +315,7 @@ function clampHistoricalDateParts(parts: HistoricalDateParts): HistoricalDatePar
     year: Number.isFinite(parts.year) ? Math.trunc(parts.year) : 0,
     month,
     day: Math.min(daysInMonth, Math.max(1, parts.day)),
+    precision: parts.precision ?? "day",
   };
 }
 
@@ -311,6 +327,7 @@ function formatHistoricalDateSearch(value: string | undefined) {
   const parts = parseHistoricalDateParts(value);
   if (!parts) return "";
   const displayYear = parts.year < 1 ? `前${Math.abs(parts.year) + 1}` : String(parts.year);
+  if (parts.precision === "year") return displayYear;
   return `${displayYear}-${padDatePart(parts.month)}-${padDatePart(parts.day)}`;
 }
 
@@ -328,6 +345,10 @@ function getRecordCountryIds(record: Event | Person) {
 
 function getRecordRegionIds(record: Event | Person) {
   return record.regionIds ?? [];
+}
+
+function getPersonCategories(person: Person) {
+  return uniqueValues([...(person.affiliations ?? []), ...(person.genres ?? [])]);
 }
 
 function hasCoordinates(record: Event) {
@@ -353,6 +374,9 @@ const representativeLocations: Array<{ keywords: string[]; point: MapPoint }> = 
   { keywords: ["イオニア", "小アジア", "アナトリア"], point: { latitude: 38.42, longitude: 27.14 } },
   { keywords: ["地中海"], point: { latitude: 36.2, longitude: 18.0 } },
   { keywords: ["エーゲ海"], point: { latitude: 38.5, longitude: 25.0 } },
+  { keywords: ["本能寺", "本能寺の変"], point: { latitude: 35.0057, longitude: 135.7679 } },
+  { keywords: ["二条城"], point: { latitude: 35.0142, longitude: 135.7482 } },
+  { keywords: ["京都御所", "御所"], point: { latitude: 35.0254, longitude: 135.7621 } },
   { keywords: ["日本", "東京", "江戸"], point: { latitude: 35.6762, longitude: 139.6503 } },
   { keywords: ["奈良", "平城京"], point: { latitude: 34.6851, longitude: 135.8048 } },
   { keywords: ["平安", "平安京", "京都"], point: { latitude: 35.0116, longitude: 135.7681 } },
@@ -387,20 +411,30 @@ function getRepresentativeLocation(locationName: string, regions: Region[], coun
   });
   if (region) return { latitude: region.latitude, longitude: region.longitude };
 
-  const searchText = normalizeLocationName([locationName, ...countryNames].join(" "));
-  const dictionaryPoint = representativeLocations.find((location) =>
-    location.keywords.some((keyword) => searchText.includes(normalizeLocationName(keyword))),
-  )?.point;
+  const dictionaryPoint = getDictionaryLocation(locationName, countryNames);
   if (dictionaryPoint) return dictionaryPoint;
 
   const countryRegions = regions.filter((region) => countryIds.includes(region.countryId));
   return averageRegionPoint(countryRegions);
 }
 
+function getDictionaryLocation(locationName: string, countryNames: string[] = []) {
+  const searchText = normalizeLocationName([locationName, ...countryNames].join(" "));
+  return representativeLocations.find((location) =>
+    location.keywords.some((keyword) => searchText.includes(normalizeLocationName(keyword))),
+  )?.point;
+}
+
+function isSameMapPoint(a: MapPoint | undefined, b: MapPoint | undefined) {
+  if (!a || !b) return false;
+  return Math.abs(a.latitude - b.latitude) < 0.0001 && Math.abs(a.longitude - b.longitude) < 0.0001;
+}
+
 function getLocationSearchAliases(locationName: string) {
   const normalizedLocation = normalizeLocationName(locationName);
   const aliases: string[] = [];
   if (normalizedLocation.includes("ペロポネソス")) aliases.push("Peloponnese Greece");
+  if (normalizedLocation.includes("本能寺")) aliases.push("Honno-ji Temple Kyoto", "本能寺 京都");
   if (normalizedLocation.includes("アテナイ") || normalizedLocation.includes("アテネ")) aliases.push("Athens Greece");
   if (normalizedLocation.includes("スパルタ")) aliases.push("Sparta Greece");
   if (normalizedLocation.includes("小アジア") || normalizedLocation.includes("アナトリア")) aliases.push("Anatolia Turkey");
@@ -424,6 +458,25 @@ function buildLocationQueries(locationName: string, countryNames: string[], coun
 
 function matchesSearch(value: string, query: string) {
   return value.toLocaleLowerCase("ja").includes(query.trim().toLocaleLowerCase("ja"));
+}
+
+function labelCountries(countryIds: string[], countries: Country[]) {
+  if (countryIds.length === 0) return ["国なし"];
+  return countryIds.map((id) => getCountryName(countries, id));
+}
+
+function groupRecords<T extends { id: string }>(records: T[], getLabels: (record: T) => string[]) {
+  const groups = new Map<string, T[]>();
+  records.forEach((record) => {
+    const labels = uniqueValues(getLabels(record).map((label) => label.trim()).filter(Boolean));
+    const resolvedLabels = labels.length > 0 ? labels : ["未分類"];
+    resolvedLabels.forEach((label) => {
+      groups.set(label, [...(groups.get(label) ?? []), record]);
+    });
+  });
+  return Array.from(groups.entries())
+    .map(([label, groupRecords]) => ({ label, records: groupRecords }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ja"));
 }
 
 function escapeHtml(value: string) {
@@ -484,7 +537,7 @@ function writeLocalDatabase(data: PersistedDatabase) {
 }
 
 function blockText(blocks?: ContentBlock[]) {
-  return (blocks ?? []).map((block) => `${block.text} ${block.caption ?? ""}`).join(" ");
+  return (blocks ?? []).map((block) => `${stripHtml(block.text)} ${block.caption ?? ""}`).join(" ");
 }
 
 function renderRichText(text: string) {
@@ -495,6 +548,96 @@ function renderRichText(text: string) {
     }
     return <span key={`${part}-${index}`}>{part}</span>;
   });
+}
+
+function stripHtml(value: string) {
+  return value.replace(/<[^>]*>/g, " ");
+}
+
+function sanitizeRichHtml(value: string) {
+  if (!value.trim()) return "";
+  const template = document.createElement("template");
+  template.innerHTML = value;
+  const allowedTags = new Set([
+    "B",
+    "BLOCKQUOTE",
+    "BR",
+    "DIV",
+    "EM",
+    "FIGCAPTION",
+    "FIGURE",
+    "H2",
+    "H3",
+    "I",
+    "IFRAME",
+    "IMG",
+    "LI",
+    "OL",
+    "P",
+    "FONT",
+    "SPAN",
+    "STRONG",
+    "U",
+    "UL",
+  ]);
+  const allowedAttributes = new Set(["allowfullscreen", "alt", "color", "src", "style", "title"]);
+  Array.from(template.content.querySelectorAll("*")).forEach((element) => {
+    if (!allowedTags.has(element.tagName)) {
+      element.replaceWith(document.createTextNode(element.textContent ?? ""));
+      return;
+    }
+    Array.from(element.attributes).forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (!allowedAttributes.has(name) || name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+    const style = element.getAttribute("style");
+    if (style) {
+      const color = style.match(/color:\s*([^;]+)/i)?.[1]?.trim();
+      if (color && /^#[0-9a-f]{3,8}$/i.test(color)) {
+        element.setAttribute("style", `color: ${color}`);
+      } else {
+        element.removeAttribute("style");
+      }
+    }
+    if ((element.tagName === "IMG" || element.tagName === "IFRAME") && !isSafeMediaUrl(element.getAttribute("src") ?? "")) {
+      element.remove();
+    }
+  });
+  return template.innerHTML;
+}
+
+function isSafeMediaUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function blocksToFreeHtml(blocks?: ContentBlock[]) {
+  if (!blocks?.length) return "";
+  const htmlBlock = blocks.find((block) => block.type === "html");
+  if (htmlBlock) return htmlBlock.text;
+  return blocks
+    .map((block) => {
+      const text = escapeHtml(block.text);
+      const caption = block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : "";
+      if (block.type === "heading") return `<h2>${text}</h2>`;
+      if (block.type === "subheading") return `<h3>${text}</h3>`;
+      if (block.type === "quote") return `<blockquote>${text}</blockquote>`;
+      if (block.type === "image") return `<figure><img src="${escapeHtml(block.text)}" alt="${escapeHtml(block.caption || "本文画像")}" />${caption}</figure>`;
+      if (block.type === "video") return `<figure><iframe src="${escapeHtml(toEmbedUrl(block.text))}" title="${escapeHtml(block.caption || block.text)}" allowfullscreen></iframe>${caption}</figure>`;
+      return `<p>${text}</p>`;
+    })
+    .join("");
+}
+
+function freeHtmlToBlocks(html: string): ContentBlock[] {
+  const sanitized = sanitizeRichHtml(html);
+  return sanitized.trim() ? [{ id: makeId("block"), type: "html", text: sanitized }] : [];
 }
 
 function toEmbedUrl(value: string) {
@@ -529,8 +672,9 @@ function App() {
   const [countries, setCountries] = useState<Country[]>(seedCountries);
   const [regions, setRegions] = useState<Region[]>(seedRegions);
   const [viewMode, setViewMode] = useState<ViewMode>("timeline");
-  const [category, setCategory] = useState<Category | "all">("all");
-  const [country, setCountry] = useState<string | "all">("all");
+  const [categoryFilters, setCategoryFilters] = useState<Category[]>([]);
+  const [personCategoryFilters, setPersonCategoryFilters] = useState<string[]>([]);
+  const [countryFilters, setCountryFilters] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
   const [customGenres, setCustomGenres] = useState<string[]>([]);
@@ -545,10 +689,12 @@ function App() {
   const [timelineZoom, setTimelineZoom] = useState(1);
   const [timelineHeightZoom, setTimelineHeightZoom] = useState(1.35);
   const [timelineLaneMode, setTimelineLaneMode] = useState<TimelineLaneMode>("plain");
+  const [cardGroupMode, setCardGroupMode] = useState<CardGroupMode>("all");
   const [showEraPeriods, setShowEraPeriods] = useState(true);
   const [activeRecord, setActiveRecord] = useState<EditableRecord | null>(null);
   const [termPopup, setTermPopup] = useState<TermPopup | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [topFiltersOpen, setTopFiltersOpen] = useState(false);
   const [hasLoadedSavedData, setHasLoadedSavedData] = useState(false);
   const [saveStatus, setSaveStatus] = useState("読み込み中");
 
@@ -561,6 +707,10 @@ function App() {
     () => uniqueValues([...baseTermCategories, ...termCards.map((term) => term.category)]),
     [termCards],
   );
+  const personCategories = useMemo(
+    () => uniqueValues(people.flatMap((person) => getPersonCategories(person))),
+    [people],
+  );
   const genres = useMemo(
     () =>
       uniqueValues([
@@ -572,8 +722,22 @@ function App() {
     [customGenres, events, people, termCards],
   );
   const filteredItems = useMemo(
-    () => filterTimelineItems(timelineItems, { category, country }),
-    [category, country, timelineItems],
+    () =>
+      timelineItems.filter((item) => {
+        const matchesCategory = categoryFilters.length === 0 || categoryFilters.includes(item.category);
+        const itemCountryIds = getRecordCountryIds(item);
+        const matchesCountry =
+          countryFilters.length === 0 ||
+          countryFilters.some(
+            (countryId) =>
+              itemCountryIds.includes(countryId) ||
+              item.relatedCountries.includes(countryId) ||
+              item.people.some((person) => getRecordCountryIds(person).includes(countryId)) ||
+              item.people.some((person) => person.affiliations.includes(countryId)),
+          );
+        return matchesCategory && matchesCountry;
+      }),
+    [categoryFilters, countryFilters, timelineItems],
   );
   const searchedItems = useMemo(() => {
     if (!searchQuery.trim()) return filteredItems;
@@ -599,33 +763,42 @@ function App() {
   }, [filteredItems, searchQuery, countries, regions]);
 
   const relatedPeople = useMemo(() => {
-    const linkedIds = new Set(searchedItems.flatMap((item) => item.people.map((person) => person.id)));
+      const linkedIds = new Set(searchedItems.flatMap((item) => item.people.map((person) => person.id)));
     return people.filter((person) => {
       const matchesLinkedEvent = linkedIds.has(person.id);
-      const matchesCountry = country === "all" || getRecordCountryIds(person).includes(country);
+      const matchesCountry = countryFilters.length === 0 || countryFilters.some((countryId) => getRecordCountryIds(person).includes(countryId));
+      const matchesCategory = personCategoryFilters.length === 0 || personCategoryFilters.some((category) => getPersonCategories(person).includes(category));
       const matchesText =
         !searchQuery.trim() ||
         matchesSearch(
           [
             person.name,
+            (person.aliases ?? []).join(" "),
             person.summary,
             blockText(person.contentBlocks),
+            blockText(person.episodeBlocks),
             getRecordCountryIds(person).map((id) => getCountryName(countries, id)).join(" "),
             getRecordRegionIds(person).map((id) => getRegionName(regions, id)).join(" "),
-            person.affiliations.join(" "),
-            (person.genres ?? []).join(" "),
+            getPersonCategories(person).join(" "),
+            (person.majorWorks ?? []).join(" "),
             (person.references ?? []).join(" "),
           ].join(" "),
           searchQuery,
         );
-      return (matchesLinkedEvent || matchesCountry) && matchesText;
+      return (matchesLinkedEvent || matchesCountry) && matchesCategory && matchesText;
     });
-  }, [country, searchedItems, people, searchQuery, countries, regions]);
+  }, [personCategoryFilters, countryFilters, searchedItems, people, searchQuery, countries, regions]);
 
   const termTargets = useMemo(() => {
     const targets = new Map<string, EditableRecord>();
-    events.forEach((event) => targets.set(event.title, { type: "event", id: event.id }));
-    people.forEach((person) => targets.set(person.name, { type: "person", id: person.id }));
+    events.forEach((event) => {
+      targets.set(event.title, { type: "event", id: event.id });
+      (event.aliases ?? []).forEach((alias) => targets.set(alias, { type: "event", id: event.id }));
+    });
+    people.forEach((person) => {
+      targets.set(person.name, { type: "person", id: person.id });
+      (person.aliases ?? []).forEach((alias) => targets.set(alias, { type: "person", id: person.id }));
+    });
     termCards.forEach((term) => {
       targets.set(term.term, { type: "term", id: term.id });
       term.aliases.forEach((alias) => targets.set(alias, { type: "term", id: term.id }));
@@ -638,11 +811,16 @@ function App() {
       id: event.id,
       type: "event" as const,
       title: event.title,
+      aliases: event.aliases ?? [],
       label: `出来事 / ${event.category}`,
       summary: event.summary,
       meta: `${toLabelDate(event.startDate)}${event.endDate ? ` - ${toLabelDate(event.endDate)}` : ""}`,
+      groupCategory: event.category,
+      countryIds: getRecordCountryIds(event),
+      tags: [event.category, ...(event.genres ?? [])],
       searchText: [
         event.title,
+        (event.aliases ?? []).join(" "),
         event.category,
         event.summary,
         event.detail,
@@ -660,17 +838,23 @@ function App() {
       id: person.id,
       type: "person" as const,
       title: person.name,
+      aliases: person.aliases ?? [],
       label: "人物",
       summary: person.summary,
       meta: toPersonLifeLabel(person),
+      groupCategory: getPersonCategories(person)[0] ?? "未分類",
+      countryIds: getRecordCountryIds(person),
+      tags: getPersonCategories(person),
       searchText: [
         person.name,
+        (person.aliases ?? []).join(" "),
         person.summary,
         blockText(person.contentBlocks),
+        blockText(person.episodeBlocks),
         getRecordCountryIds(person).map((id) => getCountryName(countries, id)).join(" "),
         getRecordRegionIds(person).map((id) => getRegionName(regions, id)).join(" "),
-        person.affiliations.join(" "),
-        (person.genres ?? []).join(" "),
+        getPersonCategories(person).join(" "),
+        (person.majorWorks ?? []).join(" "),
         (person.references ?? []).join(" "),
       ].join(" "),
     }));
@@ -678,9 +862,13 @@ function App() {
       id: term.id,
       type: "term" as const,
       title: term.term,
+      aliases: term.aliases,
       label: `単語 / ${term.category}`,
       summary: term.summary,
       meta: term.aliases.length ? `別名: ${term.aliases.join("、")}` : "単語カード",
+      groupCategory: term.category,
+      countryIds: [],
+      tags: term.genres ?? [],
       searchText: [
         term.term,
         term.category,
@@ -700,6 +888,10 @@ function App() {
     if (!searchQuery.trim()) return allCards;
     return allCards.filter((card) => matchesSearch(card.searchText, searchQuery));
   }, [allCards, searchQuery]);
+  const searchedTermCards = useMemo(
+    () => searchedCards.filter((card) => card.type === "term"),
+    [searchedCards],
+  );
 
   const activeEvent =
     activeRecord?.type === "event" ? events.find((event) => event.id === activeRecord.id) ?? null : null;
@@ -796,6 +988,31 @@ function App() {
     setTermCards((current) => current.map((term) => (term.id === id ? { ...term, ...patch } : term)));
   }
 
+  function updatePersonWorks(id: string, works: string[]) {
+    const nextWorks = uniqueValues(works.map((work) => work.trim()));
+    setPeople((current) => current.map((person) => (person.id === id ? { ...person, majorWorks: nextWorks } : person)));
+    setTermCards((current) => {
+      const existingTerms = new Set(current.map((term) => term.term));
+      const newWorkTerms = nextWorks
+        .filter((work) => work && !existingTerms.has(work))
+        .map((work): TermCard => ({
+          id: makeId("term"),
+          term: work,
+          category: "著作",
+          summary: "著作の概要を入力してください。",
+          detail: "著作の詳細を入力してください。",
+          aliases: [],
+          relatedTerms: [],
+          contentBlocks: [],
+          genres: ["著作"],
+          imageUrls: [],
+          references: [],
+          learningFiles: [],
+        }));
+      return [...current, ...newWorkTerms];
+    });
+  }
+
   function deleteEvent(id: string) {
     if (!window.confirm("本当にこの出来事を削除しますか？")) return;
     setEvents((current) => current.filter((event) => event.id !== id));
@@ -820,10 +1037,62 @@ function App() {
     setDetailEditMode(false);
   }
 
+  function deleteEventCategory(targetCategory: string) {
+    if (targetCategory === "all") return;
+    if (!window.confirm(`本当に「${targetCategory}」を出来事カテゴリから削除しますか？`)) return;
+    setEvents((current) =>
+      current.map((event) => (event.category === targetCategory ? { ...event, category: "未分類" } : event)),
+    );
+    setCustomCategories((current) => current.filter((candidate) => candidate !== targetCategory));
+    setCategoryFilters((current) => current.filter((category) => category !== targetCategory));
+  }
+
+  function deletePersonCategory(targetCategory: string) {
+    if (targetCategory === "all") return;
+    if (!window.confirm(`本当に「${targetCategory}」を人物カテゴリから削除しますか？`)) return;
+    setPeople((current) =>
+      current.map((person) => ({
+        ...person,
+        affiliations: (person.affiliations ?? []).filter((candidate) => candidate !== targetCategory),
+        genres: (person.genres ?? []).filter((candidate) => candidate !== targetCategory),
+      })),
+    );
+    setCustomGenres((current) => current.filter((candidate) => candidate !== targetCategory));
+    setPersonCategoryFilters((current) => current.filter((category) => category !== targetCategory));
+  }
+
+  function deleteCountry(targetCountryId: string) {
+    if (targetCountryId === "all") return;
+    const targetCountry = countries.find((candidate) => candidate.id === targetCountryId);
+    if (!targetCountry) return;
+    if (!window.confirm(`本当に「${targetCountry.name}」を国から削除しますか？`)) return;
+    const removedRegionIds = new Set(regions.filter((region) => region.countryId === targetCountryId).map((region) => region.id));
+    setEvents((current) =>
+      current.map((event) => ({
+        ...event,
+        countryIds: (event.countryIds ?? []).filter((id) => id !== targetCountryId),
+        regionIds: (event.regionIds ?? []).filter((id) => !removedRegionIds.has(id)),
+        relatedCountries: event.relatedCountries.filter((name) => name !== targetCountry.name),
+      })),
+    );
+    setPeople((current) =>
+      current.map((person) => ({
+        ...person,
+        countryIds: (person.countryIds ?? []).filter((id) => id !== targetCountryId),
+        regionIds: (person.regionIds ?? []).filter((id) => !removedRegionIds.has(id)),
+      })),
+    );
+    setRegions((current) => current.filter((region) => region.countryId !== targetCountryId));
+    setCountries((current) => current.filter((candidate) => candidate.id !== targetCountryId));
+    setCountryFilters((current) => current.filter((countryId) => countryId !== targetCountryId));
+    if (newRegionCountryId === targetCountryId) setNewRegionCountryId(countries.find((candidate) => candidate.id !== targetCountryId)?.id ?? "");
+  }
+
   function openRecord(record: EditableRecord) {
     setActiveRecord(record);
     setDetailEditMode(false);
     setTermPopup(null);
+    setTopFiltersOpen(false);
   }
 
   function addEvent() {
@@ -831,6 +1100,7 @@ function App() {
     const newEvent: Event = {
       id,
       title: "新しい出来事",
+      aliases: [],
       startDate: "1914-01-01",
       category: "政治",
       relatedCountries: [],
@@ -843,10 +1113,12 @@ function App() {
       genres: [],
       imageUrls: [],
       references: [],
+      learningFiles: [],
     };
     setEvents((current) => [...current, newEvent]);
     setActiveRecord({ type: "event", id });
     setDetailEditMode(true);
+    setTopFiltersOpen(false);
   }
 
   function addPerson() {
@@ -854,20 +1126,25 @@ function App() {
     const newPerson: Person = {
       id,
       name: "新しい人物",
+      aliases: [],
       birthYear: 1900,
       deathYear: 1970,
       countryIds: [],
       regionIds: [],
       affiliations: [],
       summary: "人物の概要を入力してください。",
+      majorWorks: [],
+      episodeBlocks: [],
       contentBlocks: [],
       genres: [],
       imageUrls: [],
       references: [],
+      learningFiles: [],
     };
     setPeople((current) => [...current, newPerson]);
     setActiveRecord({ type: "person", id });
     setDetailEditMode(true);
+    setTopFiltersOpen(false);
   }
 
   function addTermCard() {
@@ -884,10 +1161,12 @@ function App() {
       genres: [],
       imageUrls: [],
       references: [],
+      learningFiles: [],
     };
     setTermCards((current) => [...current, newTerm]);
     setActiveRecord({ type: "term", id });
     setDetailEditMode(true);
+    setTopFiltersOpen(false);
   }
 
   function openTerm(term: string) {
@@ -904,7 +1183,7 @@ function App() {
     if (!next) return;
     setCustomCategories((current) => uniqueValues([...current, next]));
     setNewCategoryName("");
-    if (category === "all") setCategory(next);
+    setCategoryFilters((current) => uniqueValues([...current, next]));
   }
 
   function addGenre() {
@@ -1017,111 +1296,6 @@ function App() {
             })}
           </div>
 
-          <div className="filter-title">
-            <Filter size={16} />
-            <span>絞り込み</span>
-          </div>
-
-          <label>
-            データベース検索
-            <input
-              placeholder="人物・出来事・単語を検索"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-          </label>
-
-          <label>
-            カテゴリ
-            <select value={category} onChange={(event) => setCategory(event.target.value as Category | "all")}>
-              {["all", ...categories].map((candidate) => (
-                <option key={candidate} value={candidate}>
-                  {candidate === "all" ? "すべて" : candidate}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            カテゴリ追加
-            <div className="inline-add">
-              <input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="例: 宗教" />
-              <button type="button" onClick={addCategory}>
-                <Plus size={14} />
-              </button>
-            </div>
-          </label>
-
-          <label>
-            ジャンル追加
-            <div className="inline-add">
-              <input value={newGenreName} onChange={(event) => setNewGenreName(event.target.value)} placeholder="例: 哲学史" />
-              <button type="button" onClick={addGenre}>
-                <Plus size={14} />
-              </button>
-            </div>
-          </label>
-
-          <label>
-            国
-            <select value={country} onChange={(event) => setCountry(event.target.value)}>
-              <option value="all">すべて</option>
-              {countries.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            国追加
-            <div className="inline-add">
-              <input value={newCountryName} onChange={(event) => setNewCountryName(event.target.value)} placeholder="例: 中国" />
-              <button type="button" onClick={addCountry}>
-                <Plus size={14} />
-              </button>
-            </div>
-          </label>
-
-          <div className="region-add-box">
-            <span>地域・ピン追加</span>
-            <select value={newRegionCountryId} onChange={(event) => setNewRegionCountryId(event.target.value)}>
-              {countries.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.name}
-                </option>
-              ))}
-            </select>
-            <input value={newRegionName} onChange={(event) => setNewRegionName(event.target.value)} placeholder="地域名" />
-            <div className="date-fields">
-              <input value={newRegionLatitude} onChange={(event) => setNewRegionLatitude(event.target.value)} placeholder="緯度" />
-              <input value={newRegionLongitude} onChange={(event) => setNewRegionLongitude(event.target.value)} placeholder="経度" />
-            </div>
-            <button type="button" onClick={addRegion}>
-              <Plus size={14} />
-              地域を追加
-            </button>
-          </div>
-
-          <button
-            className="reset-button"
-            type="button"
-            onClick={() => {
-              setCategory("all");
-              setCountry("all");
-              setSearchQuery("");
-              setMobileFiltersOpen(false);
-            }}
-          >
-            <RotateCcw size={16} />
-            リセット
-          </button>
-
-          <div className="query-readout">
-            <span>{searchedCards.length}</span>
-            <p>カード / {searchedItems.length}件の出来事</p>
-          </div>
         </aside>
 
         <section className="database-area">
@@ -1131,11 +1305,17 @@ function App() {
               <h1>第一次世界大戦</h1>
               <span className="save-status">{saveStatus}</span>
             </div>
+            <div className="top-search-filter">
+              <label className="top-search-box">
+                <Search size={15} />
+                <input
+                  placeholder="ページ内検索"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                />
+              </label>
+            </div>
             <div className="action-toolbar">
-              <button className="mobile-filter-toggle" type="button" onClick={() => setMobileFiltersOpen((value) => !value)}>
-                <Filter size={15} />
-                絞り込み
-              </button>
               <button type="button" onClick={addEvent}>
                 <Plus size={15} />
                 出来事
@@ -1149,48 +1329,84 @@ function App() {
                 単語
               </button>
               <button
-                className={timelineLaneMode === "country" ? "active-tool" : ""}
-                type="button"
-                onClick={() => setTimelineLaneMode((value) => (value === "country" ? "plain" : "country"))}
-              >
-                {timelineLaneMode === "country" ? "国あり" : "国なし"}
-              </button>
-              <button
                 className={showEraPeriods ? "active-tool" : ""}
                 type="button"
                 onClick={() => setShowEraPeriods((value) => !value)}
               >
                 時代区分
               </button>
-              <button type="button" onClick={() => setTimelineZoom((value) => clampTimelineZoom(value / 1.8))}>
-                <ZoomOut size={15} />
-              </button>
-              <span className="zoom-readout">{Math.round(timelineZoom * 100)}%</span>
-              <button type="button" onClick={() => setTimelineZoom((value) => clampTimelineZoom(value * 1.8))}>
-                <ZoomIn size={15} />
-              </button>
-              <input
-                className="zoom-input"
-                min="10"
-                max="20000"
-                type="number"
-                value={Math.round(timelineZoom * 100)}
-                onChange={(event) => setTimelineZoom(clampTimelineZoom(Number(event.target.value || 100) / 100))}
-              />
-              <button type="button" onClick={() => setTimelineHeightZoom((value) => Math.max(0.8, value - 0.3))}>
-                縦-
-              </button>
-              <button type="button" onClick={() => setTimelineHeightZoom((value) => Math.min(5, value + 0.3))}>
-                縦+
-              </button>
             </div>
           </div>
+          <div className="top-filter-panel">
+              {(viewMode === "category" || viewMode === "people" || viewMode === "terms") && (
+                <div className="group-mode-control">
+                  <span>表示</span>
+                  <div>
+                    {[
+                      { id: "all", label: "全カード" },
+                      { id: "category", label: "カテゴリ別" },
+                      { id: "country", label: "国別" },
+                    ].map((mode) => (
+                      <button
+                        className={cardGroupMode === mode.id ? "active" : ""}
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setCardGroupMode(mode.id as CardGroupMode)}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <FilterSearchSelect
+                label="出来事カテゴリ"
+                values={categoryFilters}
+                onChange={(values) => setCategoryFilters(values as Category[])}
+                onDelete={deleteEventCategory}
+                options={categories
+                  .filter((value, index, array) => array.indexOf(value) === index)
+                  .map((candidate) => ({ value: candidate, label: candidate }))}
+                placeholder="出来事カテゴリを検索"
+              />
+              <FilterSearchSelect
+                label="人物カテゴリ"
+                values={personCategoryFilters}
+                onChange={setPersonCategoryFilters}
+                onDelete={deletePersonCategory}
+                options={personCategories
+                  .filter((value, index, array) => array.indexOf(value) === index)
+                  .map((candidate) => ({ value: candidate, label: candidate }))}
+                placeholder="人物カテゴリを検索"
+              />
+              <FilterSearchSelect
+                label="国"
+                values={countryFilters}
+                onChange={setCountryFilters}
+                onDelete={deleteCountry}
+                options={countries.map((candidate) => ({ value: candidate.id, label: candidate.name }))}
+                placeholder="国を検索"
+              />
+              <button
+                className="reset-button"
+                type="button"
+                onClick={() => {
+                  setCategoryFilters([]);
+                  setPersonCategoryFilters([]);
+                  setCountryFilters([]);
+                  setSearchQuery("");
+                }}
+              >
+                <RotateCcw size={16} />
+                リセット
+              </button>
+            </div>
 
           {viewMode === "timeline" && (
             <TimelineView
               items={searchedItems}
               people={relatedPeople}
-              country={country}
+              countriesFilter={countryFilters}
               zoom={timelineZoom}
               heightZoom={timelineHeightZoom}
               laneMode={timelineLaneMode}
@@ -1202,11 +1418,25 @@ function App() {
           )}
 
           {viewMode === "category" && (
-            <CategoryView categories={categories} items={searchedItems} onOpenRecord={(id) => openRecord({ type: "event", id })} />
+            <CategoryView
+              countries={countries}
+              groupMode={cardGroupMode}
+              items={searchedItems}
+              onOpenRecord={(id) => openRecord({ type: "event", id })}
+            />
           )}
 
           {viewMode === "people" && (
-            <PeopleView people={relatedPeople} onOpenRecord={(id) => openRecord({ type: "person", id })} />
+            <PeopleView
+              countries={countries}
+              groupMode={cardGroupMode}
+              people={relatedPeople}
+              onOpenRecord={(id) => openRecord({ type: "person", id })}
+            />
+          )}
+
+          {viewMode === "terms" && (
+            <AllCardsView cards={searchedTermCards} countries={countries} groupMode={cardGroupMode} compact onOpenRecord={openRecord} />
           )}
 
           {viewMode === "cards" && (
@@ -1228,6 +1458,8 @@ function App() {
             event={activeEvent}
             person={activePerson}
             term={activeTerm}
+            termCards={termCards}
+            allCards={allCards}
             onClose={() => {
               setActiveRecord(null);
               setTermPopup(null);
@@ -1238,11 +1470,13 @@ function App() {
             onEditModeChange={setDetailEditMode}
             categories={categories}
             termCategories={termCategories}
+            personCategories={personCategories}
             genres={genres}
             countries={countries}
             regions={regions}
             onUpdateEvent={updateEvent}
             onUpdatePerson={updatePerson}
+            onUpdatePersonWorks={updatePersonWorks}
             onUpdateTerm={updateTermCard}
             onDeleteEvent={deleteEvent}
             onDeletePerson={deletePerson}
@@ -1268,7 +1502,7 @@ function App() {
 function TimelineView({
   items,
   people,
-  country,
+  countriesFilter,
   zoom,
   heightZoom,
   laneMode,
@@ -1279,7 +1513,7 @@ function TimelineView({
 }: {
   items: TimelineItem[];
   people: Person[];
-  country: string | "all";
+  countriesFilter: string[];
   zoom: number;
   heightZoom: number;
   laneMode: TimelineLaneMode;
@@ -1300,8 +1534,9 @@ function TimelineView({
   const personYears = people.flatMap((person) => [getTimelineYearPosition(getPersonBirthDate(person)), getTimelineYearPosition(getPersonDeathDate(person))]);
   const hasTimelineData = eventYears.length > 0 || personYears.length > 0;
   const allTimelineYears = [...eventYears, ...personYears];
+  const currentYear = new Date().getFullYear();
   const minYear = hasTimelineData ? Math.floor(Math.min(...allTimelineYears) / 10) * 10 : 0;
-  const maxYear = hasTimelineData ? Math.ceil(Math.max(...allTimelineYears) / 10) * 10 : 10;
+  const maxYear = hasTimelineData ? Math.ceil(Math.max(...allTimelineYears, currentYear) / 10) * 10 : Math.ceil(currentYear / 10) * 10;
   const span = maxYear - minYear || 1;
   const timelinePixelWidth = getTimelinePixelWidth(span, zoom);
   const tickStep = getYearTickStep(zoom, span);
@@ -1313,8 +1548,8 @@ function TimelineView({
   const countryLanes =
     laneMode === "plain"
         ? ["出来事"]
-        : country !== "all"
-          ? [country]
+        : countriesFilter.length > 0
+          ? countriesFilter
           : Array.from(new Set(items.flatMap((item) => (getRecordCountryIds(item).length ? getRecordCountryIds(item) : ["unclassified"])))).slice(0, 20);
   const visibleEras = eras.filter((era) => era.endYear >= minYear && era.startYear <= maxYear);
   const eraGroups = Array.from(new Set(visibleEras.map((era) => era.group)));
@@ -1334,8 +1569,8 @@ function TimelineView({
       const targetCountries =
         laneMode === "plain"
           ? ["出来事"]
-          : country !== "all"
-            ? [country]
+          : countriesFilter.length > 0
+            ? countriesFilter
             : getRecordCountryIds(item).length
               ? getRecordCountryIds(item)
               : ["unclassified"];
@@ -1520,22 +1755,34 @@ function TimelineView({
               {visibleEras.map((era) => {
                 const start = Math.max(era.startYear, minYear);
                 const end = Math.min(era.endYear, maxYear);
+                const startPercent = positionYearPercent(start);
+                const endPercent = positionYearPercent(end);
+                const bandWidthPercent = Math.max(endPercent - startPercent, 0.4);
+                const bandStartPx = (startPercent / 100) * timelinePixelWidth;
+                const bandWidthPx = (bandWidthPercent / 100) * timelinePixelWidth;
+                const labelLeftPx = Math.min(
+                  Math.max(timelineScrollLeft - bandStartPx + 10, 0),
+                  Math.max(bandWidthPx - 86, 0),
+                );
                 return (
                   <span
                     className="era-band"
                     key={era.id}
                     style={
                       {
-                        "--left": `${positionYearPercent(start)}%`,
-                        "--width": `${Math.max(positionYearPercent(end) - positionYearPercent(start), 0.4)}%`,
+                        "--left": `${startPercent}%`,
+                        "--width": `${bandWidthPercent}%`,
+                        "--label-left": `${labelLeftPx}px`,
                         "--era-row": eraGroups.indexOf(era.group),
                         "--era-color": era.color,
                       } as CSSProperties
                     }
                     title={`${era.group}: ${era.name} (${toDisplayYear(era.startYear)}-${toDisplayYear(era.endYear)})`}
                   >
-                    <small>{era.group}</small>
-                    {era.name}
+                    <span className="era-band-label">
+                      <small>{era.group}</small>
+                      {era.name}
+                    </span>
                   </span>
                 );
               })}
@@ -1628,56 +1875,113 @@ function TimelineView({
 }
 
 function CategoryView({
-  categories,
+  countries,
+  groupMode,
   items,
   onOpenRecord,
 }: {
-  categories: Category[];
+  countries: Country[];
+  groupMode: CardGroupMode;
   items: TimelineItem[];
   onOpenRecord: (id: string) => void;
 }) {
-  const grouped = categories
-    .map((category) => ({ category, items: items.filter((item) => item.category === category) }))
-    .filter((group) => group.items.length > 0);
+  const grouped =
+    groupMode === "category"
+      ? groupRecords(items, (item) => [item.category || "未分類"])
+      : groupMode === "country"
+        ? groupRecords(items, (item) => labelCountries(getRecordCountryIds(item), countries))
+        : [{ label: "すべての出来事", records: items }];
 
   return (
-    <div className="category-board">
+    <div className="grouped-card-board">
       {grouped.map((group) => (
-        <section className="category-column" key={group.category}>
-          <h2>{group.category}</h2>
-          {group.items.map((item) => (
-            <button className="list-card" key={item.id} onClick={() => onOpenRecord(item.id)} type="button">
-              <span>{item.title}</span>
-              <small>
-                {toLabelDate(item.startDate)}
-                {item.endDate ? ` - ${toLabelDate(item.endDate)}` : ""}
-              </small>
-              <p>{item.summary}</p>
-            </button>
-          ))}
-        </section>
+        <details className="record-group" key={group.label} open>
+          <summary>
+            <span>{group.label}</span>
+            <small>{group.records.length}</small>
+          </summary>
+          <div className="record-group-grid event-grid">
+            {group.records.map((item) => (
+              <button className="person-card compact record-card event-record-card" key={item.id} onClick={() => onOpenRecord(item.id)} type="button">
+                <div className="person-thumb">
+                  {item.imageUrls?.[0] ? <img src={item.imageUrls[0]} alt={item.title} /> : <CalendarDays size={22} />}
+                </div>
+                <span>{item.title}</span>
+                <small>
+                  {toLabelDate(item.startDate)}
+                  {item.endDate ? ` - ${toLabelDate(item.endDate)}` : ""}
+                </small>
+                <div className="person-card-body">
+                  <p>{item.summary}</p>
+                  <div className="chips person-card-tags">
+                    <span>{item.category}</span>
+                    {(item.genres ?? []).map((genre) => (
+                      <span key={genre}>{genre}</span>
+                    ))}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </details>
       ))}
     </div>
   );
 }
 
-function PeopleView({ people, onOpenRecord }: { people: Person[]; onOpenRecord: (id: string) => void }) {
+function PeopleView({
+  countries,
+  groupMode,
+  people,
+  onOpenRecord,
+}: {
+  countries: Country[];
+  groupMode: CardGroupMode;
+  people: Person[];
+  onOpenRecord: (id: string) => void;
+}) {
+  const grouped =
+    groupMode === "category"
+      ? groupRecords(people, (person) => getPersonCategories(person))
+      : groupMode === "country"
+        ? groupRecords(people, (person) => labelCountries(getRecordCountryIds(person), countries))
+        : [{ label: "すべての人物", records: people }];
+
   return (
-    <div className="people-board">
-      {people.map((person) => (
-        <button className="person-card" key={person.id} onClick={() => onOpenRecord(person.id)} type="button">
-          <span>{person.name}</span>
-              <small>
-                {toPersonLifeLabel(person)}
-              </small>
-          <p>{person.summary}</p>
-          <div className="chips">
-            {person.affiliations.map((affiliation) => (
-              <span key={affiliation}>{affiliation}</span>
+    <div className="people-board grouped-card-board">
+      {grouped.map((group) => (
+        <details className="record-group" key={group.label} open>
+          <summary>
+            <span>{group.label}</span>
+            <small>{group.records.length}</small>
+          </summary>
+          <div className="people-card-grid">
+            {group.records.map((person) => (
+              <button className="person-card compact" key={person.id} onClick={() => onOpenRecord(person.id)} type="button">
+                <div className="person-thumb">
+                  {person.imageUrls?.[0] ? <img src={person.imageUrls[0]} alt={person.name} /> : <UserRound size={22} />}
+                </div>
+                <span>{person.name}</span>
+                <small>{toPersonLifeLabel(person)}</small>
+                <div className="person-card-body">
+                  <p>{person.summary}</p>
+                  <div className="chips person-card-tags">
+                    {getPersonCategories(person).map((category) => (
+                      <span key={category}>{category}</span>
+                    ))}
+                  </div>
+                </div>
+              </button>
             ))}
           </div>
-        </button>
+        </details>
       ))}
+      {people.length === 0 && (
+        <div className="empty-state">
+          <UserRound size={22} />
+          <span>該当する人物カードがありません</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1713,6 +2017,16 @@ function MapView({
         const countryIds = getRecordCountryIds(item);
         const countryId = countryIds[0];
         const countryNames = countryIds.map((id) => getCountryName(countries, id));
+        const dictionaryLocation = getDictionaryLocation(locationName, countryNames);
+        if (dictionaryLocation) {
+          return {
+            item,
+            locationName,
+            latitude: dictionaryLocation.latitude,
+            longitude: dictionaryLocation.longitude,
+            countryId,
+          };
+        }
         if (locationName && hasCoordinates(item)) {
           return {
             item,
@@ -1751,6 +2065,26 @@ function MapView({
   const previewEventPin = eventPins.find((pin) => pin.item.id === previewEventId);
 
   useEffect(() => {
+    items.forEach((item) => {
+      const locationName = item.locationName?.trim();
+      if (!locationName) return;
+      const countryIds = getRecordCountryIds(item);
+      const countryNames = countryIds.map((id) => getCountryName(countries, id));
+      const dictionaryLocation = getDictionaryLocation(locationName, countryNames);
+      if (!dictionaryLocation) return;
+      const savedLocation = hasCoordinates(item)
+        ? { latitude: item.locationLat as number, longitude: item.locationLng as number }
+        : undefined;
+      if (isSameMapPoint(savedLocation, dictionaryLocation)) return;
+      onUpdateEvent(item.id, {
+        locationLat: dictionaryLocation.latitude,
+        locationLng: dictionaryLocation.longitude,
+        regionIds: [],
+      });
+    });
+  }, [countries, items, onUpdateEvent]);
+
+  useEffect(() => {
     if (!focusedEventPin || !googleMapRef.current) return;
     googleMapRef.current.panTo({ lat: focusedEventPin.latitude, lng: focusedEventPin.longitude });
     googleMapRef.current.setZoom(Math.max(googleMapRef.current.getZoom() ?? 7, 7));
@@ -1778,6 +2112,16 @@ function MapView({
             if (!address) return;
             const countryIds = getRecordCountryIds(item);
             const countryNames = countryIds.map((id) => getCountryName(countries, id));
+            const dictionaryLocation = getDictionaryLocation(address, countryNames);
+            if (dictionaryLocation) {
+              onUpdateEvent(item.id, {
+                locationLat: dictionaryLocation.latitude,
+                locationLng: dictionaryLocation.longitude,
+                regionIds: [],
+              });
+              setGeocodedLocations((current) => ({ ...current, [item.id]: dictionaryLocation }));
+              return;
+            }
             const representativeLocation = getRepresentativeLocation(address, regions, countryNames, countryIds);
             const queries = buildLocationQueries(address, countryNames, countryIds);
             let queryIndex = 0;
@@ -1976,30 +2320,169 @@ function MapView({
 
 function AllCardsView({
   cards,
+  countries,
+  groupMode = "all",
+  compact = false,
   onOpenRecord,
 }: {
   cards: KnowledgeCard[];
+  countries?: Country[];
+  groupMode?: CardGroupMode;
+  compact?: boolean;
   onOpenRecord: (record: EditableRecord) => void;
 }) {
+  const grouped =
+    groupMode === "category"
+      ? groupRecords(cards, (card) => [card.groupCategory ?? "未分類"])
+      : groupMode === "country"
+        ? groupRecords(cards, (card) => labelCountries(card.countryIds ?? [], countries ?? []))
+        : [{ label: "すべてのカード", records: cards }];
+
   return (
-    <div className="all-cards-board">
-      {cards.map((card) => (
-        <button
-          className={`knowledge-card ${card.type}`}
-          key={`${card.type}-${card.id}`}
-          onClick={() => onOpenRecord({ type: card.type, id: card.id })}
-          type="button"
-        >
-          <span className="knowledge-label">{card.label}</span>
-          <strong>{card.title}</strong>
-          <small>{card.meta}</small>
-          <p>{card.summary}</p>
-        </button>
+    <div className={compact ? "all-cards-board compact grouped-card-board" : "all-cards-board grouped-card-board"}>
+      {grouped.map((group) => (
+        <details className="record-group" key={group.label} open>
+          <summary>
+            <span>{group.label}</span>
+            <small>{group.records.length}</small>
+          </summary>
+          <div className="record-group-grid">
+            {group.records.map((card) => (
+              <button
+                className={`person-card compact record-card has-label ${card.type}-record-card`}
+                key={`${card.type}-${card.id}`}
+                onClick={() => onOpenRecord({ type: card.type, id: card.id })}
+                type="button"
+              >
+                <div className="person-thumb">
+                  {card.type === "event" ? <CalendarDays size={22} /> : card.type === "person" ? <UserRound size={22} /> : <BookOpen size={22} />}
+                </div>
+                <span className="record-card-label">{card.label}</span>
+                <span>{card.title}</span>
+                <small>{card.meta}</small>
+                <div className="person-card-body">
+                  <p>{card.summary}</p>
+                  {(card.tags ?? []).length > 0 && (
+                    <div className="chips person-card-tags">
+                      {(card.tags ?? []).map((tag) => (
+                        <span key={tag}>{tag}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </details>
       ))}
       {cards.length === 0 && (
         <div className="empty-state">
           <BookOpen size={22} />
           <span>該当するカードがありません</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterSearchSelect({
+  label,
+  values,
+  options,
+  placeholder,
+  onChange,
+  onDelete,
+}: {
+  label: string;
+  values: string[];
+  options: Array<{ value: string; label: string }>;
+  placeholder: string;
+  onChange: (values: string[]) => void;
+  onDelete?: (value: string) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selectedLabels = values
+    .map((value) => options.find((option) => option.value === value)?.label ?? value)
+    .filter(Boolean);
+  const selectedLabel = selectedLabels.length === 0 ? "すべて" : selectedLabels.join("、");
+  const filteredOptions = options.filter((option) => matchesSearch(option.label, query));
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  function toggleValue(nextValue: string) {
+    const nextValues = values.includes(nextValue)
+      ? values.filter((value) => value !== nextValue)
+      : [...values, nextValue];
+    onChange(nextValues);
+  }
+
+  return (
+    <div className="filter-search-select" ref={containerRef}>
+      <span>{label}</span>
+      <button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+        {selectedLabel}
+      </button>
+      {open && (
+        <div className="filter-search-menu">
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setOpen(false);
+            }}
+            placeholder={placeholder}
+          />
+          <div className="filter-search-options">
+            <div className={values.length === 0 ? "filter-search-option active" : "filter-search-option"}>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange([]);
+                  setQuery("");
+                }}
+              >
+                すべて
+              </button>
+            </div>
+            {filteredOptions.map((option) => (
+              <div className={values.includes(option.value) ? "filter-search-option active" : "filter-search-option"} key={option.value}>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => toggleValue(option.value)}>
+                  <span className="filter-check">{values.includes(option.value) ? "✓" : ""}</span>
+                  <span>{option.label}</span>
+                </button>
+                {onDelete && (
+                  <button
+                    className="filter-option-delete"
+                    type="button"
+                    aria-label={`${option.label}を削除`}
+                    title="削除"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDelete(option.value);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+            {filteredOptions.length === 0 && <p>候補がありません</p>}
+          </div>
         </div>
       )}
     </div>
@@ -2114,6 +2597,22 @@ function HistoricalDateInput({
     onChange(serialized);
   }
 
+  function commitYearOnly() {
+    const next = clampHistoricalDateParts({ ...draft, precision: "year" });
+    setDraft(next);
+    const serialized = serializeHistoricalDate(next);
+    setSearch(formatHistoricalDateSearch(serialized));
+    onChange(serialized);
+  }
+
+  function commitExactDate() {
+    const next = clampHistoricalDateParts({ ...draft, precision: "day" });
+    setDraft(next);
+    const serialized = serializeHistoricalDate(next);
+    setSearch(formatHistoricalDateSearch(serialized));
+    onChange(serialized);
+  }
+
   function applySearch() {
     const parsed = parseHistoricalDateParts(search);
     if (!parsed) {
@@ -2124,6 +2623,7 @@ function HistoricalDateInput({
   }
 
   const daysInMonth = getDaysInHistoricalMonth(draft.year, draft.month);
+  const isYearOnly = draft.precision === "year";
 
   return (
     <div className="historical-date-input">
@@ -2147,6 +2647,14 @@ function HistoricalDateInput({
           </button>
         )}
       </div>
+      <div className="date-precision-controls">
+        <button className={isYearOnly ? "active" : ""} type="button" onClick={commitYearOnly}>
+          日付指定なし
+        </button>
+        <button className={!isYearOnly ? "active" : ""} type="button" onClick={commitExactDate}>
+          年月日を指定
+        </button>
+      </div>
       <div className="date-picker-controls">
         <button type="button" onClick={() => commitDate({ ...draft, year: draft.year - 1 })}>
           年-
@@ -2155,29 +2663,33 @@ function HistoricalDateInput({
         <button type="button" onClick={() => commitDate({ ...draft, year: draft.year + 1 })}>
           年+
         </button>
-        <select
-          value={draft.month}
-          onChange={(event) => commitDate({ ...draft, month: Number(event.target.value) })}
-        >
-          {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
-            <option key={month} value={month}>
-              {month}月
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="date-day-grid">
-        {Array.from({ length: daysInMonth }, (_, index) => index + 1).map((day) => (
-          <button
-            className={day === draft.day ? "active" : ""}
-            key={day}
-            type="button"
-            onClick={() => commitDate({ ...draft, day })}
+        {!isYearOnly && (
+          <select
+            value={draft.month}
+            onChange={(event) => commitDate({ ...draft, month: Number(event.target.value), precision: "day" })}
           >
-            {day}
-          </button>
-        ))}
+            {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+              <option key={month} value={month}>
+                {month}月
+              </option>
+            ))}
+          </select>
+        )}
       </div>
+      {!isYearOnly && (
+        <div className="date-day-grid">
+          {Array.from({ length: daysInMonth }, (_, index) => index + 1).map((day) => (
+            <button
+              className={day === draft.day ? "active" : ""}
+              key={day}
+              type="button"
+              onClick={() => commitDate({ ...draft, day, precision: "day" })}
+            >
+              {day}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2190,6 +2702,158 @@ function HashtagList({ values }: { values?: string[] }) {
       {tags.map((item) => (
         <span key={item}>#{item}</span>
       ))}
+    </div>
+  );
+}
+
+function ImageUploadEditor({
+  label,
+  values,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+}) {
+  function handleUpload(files: FileList | null) {
+    const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    Promise.all(
+      imageFiles.map(
+        (file) =>
+          new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+            reader.readAsDataURL(file);
+          }),
+      ),
+    ).then((results) => onChange(uniqueValues([...values, ...results.filter(Boolean)])));
+  }
+
+  return (
+    <div className="image-upload-editor">
+      <span>{label}</span>
+      <label className="image-upload-drop">
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(event) => {
+            handleUpload(event.target.files);
+            event.target.value = "";
+          }}
+        />
+        <strong>画像を選択</strong>
+        <small>カードのプレビュー画像として保存されます</small>
+      </label>
+      {values.length > 0 && (
+        <div className="image-upload-list">
+          {values.map((value) => (
+            <figure key={value}>
+              <img src={value} alt="アップロード画像" />
+              <button type="button" onClick={() => onChange(values.filter((item) => item !== value))}>
+                削除
+              </button>
+            </figure>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function getLearningFileType(file: File): LearningFile["type"] {
+  if (file.type.startsWith("audio/")) return "audio";
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) return "pdf";
+  return "file";
+}
+
+function LearningFilesView({ files, onDelete }: { files?: LearningFile[]; onDelete?: (id: string) => void }) {
+  const visibleFiles = files ?? [];
+  if (visibleFiles.length === 0) {
+    return <p>学習ファイルはまだ登録されていません。</p>;
+  }
+
+  return (
+    <div className="learning-file-list">
+      {visibleFiles.map((file) => (
+        <article className="learning-file-card" key={file.id}>
+          <div className="learning-file-meta">
+            <strong>{file.name}</strong>
+            {onDelete && (
+              <button type="button" onClick={() => onDelete(file.id)}>
+                削除
+              </button>
+            )}
+          </div>
+          {file.type === "audio" && <audio controls src={file.dataUrl} />}
+          {file.type === "image" && <img src={file.dataUrl} alt={file.name} />}
+          {file.type === "pdf" && (
+            <a href={file.dataUrl} target="_blank" rel="noreferrer">
+              PDFを開く
+            </a>
+          )}
+          {file.type === "file" && (
+            <a href={file.dataUrl} download={file.name}>
+              ファイルを開く
+            </a>
+          )}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function LearningFilesEditor({
+  values,
+  onChange,
+}: {
+  values: LearningFile[];
+  onChange: (values: LearningFile[]) => void;
+}) {
+  function handleUpload(files: FileList | null) {
+    const uploadFiles = Array.from(files ?? []).filter(
+      (file) => file.type.startsWith("audio/") || file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"),
+    );
+    if (uploadFiles.length === 0) return;
+
+    Promise.all(
+      uploadFiles.map(
+        (file) =>
+          new Promise<LearningFile>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () =>
+              resolve({
+                id: makeId("learning"),
+                name: file.name,
+                type: getLearningFileType(file),
+                mimeType: file.type || "application/octet-stream",
+                dataUrl: typeof reader.result === "string" ? reader.result : "",
+              });
+            reader.readAsDataURL(file);
+          }),
+      ),
+    ).then((results) => onChange([...values, ...results.filter((file) => file.dataUrl)]));
+  }
+
+  return (
+    <div className="image-upload-editor learning-file-editor">
+      <span>学習ファイル</span>
+      <label className="image-upload-drop">
+        <input
+          type="file"
+          accept="audio/*,image/*,application/pdf"
+          multiple
+          onChange={(event) => {
+            handleUpload(event.target.files);
+            event.target.value = "";
+          }}
+        />
+        <strong>音声・画像・PDFを選択</strong>
+        <small>学習タブに保存されます</small>
+      </label>
+      <LearningFilesView files={values} onDelete={(id) => onChange(values.filter((file) => file.id !== id))} />
     </div>
   );
 }
@@ -2230,6 +2894,10 @@ function DetailHeroImage({
 
 function RichContentView({ blocks }: { blocks?: ContentBlock[] }) {
   if (!blocks?.length) return null;
+  const htmlBlock = blocks.find((block) => block.type === "html");
+  if (htmlBlock) {
+    return <div className="rich-content free-rich-content" dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(htmlBlock.text) }} />;
+  }
 
   return (
     <div className="rich-content">
@@ -2267,82 +2935,162 @@ function RichContentView({ blocks }: { blocks?: ContentBlock[] }) {
 
 function RichContentEditor({
   blocks,
+  editorKey,
   onChange,
 }: {
   blocks?: ContentBlock[];
+  editorKey: string;
   onChange: (blocks: ContentBlock[]) => void;
 }) {
-  const currentBlocks = blocks ?? [];
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const latestHtmlRef = useRef(blocksToFreeHtml(blocks));
+  const editorKeyRef = useRef(editorKey);
 
-  function updateBlock(id: string, patch: Partial<ContentBlock>) {
-    onChange(currentBlocks.map((block) => (block.id === id ? { ...block, ...patch } : block)));
+  useLayoutEffect(() => {
+    if (editorKeyRef.current === editorKey) return;
+    const nextHtml = blocksToFreeHtml(blocks);
+    editorKeyRef.current = editorKey;
+    latestHtmlRef.current = nextHtml;
+    if (editorRef.current) editorRef.current.innerHTML = sanitizeRichHtml(nextHtml);
+  }, [blocks, editorKey]);
+
+  function saveEditorHtml(nextHtml = editorRef.current?.innerHTML ?? "") {
+    latestHtmlRef.current = nextHtml;
+    onChange(freeHtmlToBlocks(nextHtml));
   }
 
-  function addBlock(type: ContentBlock["type"]) {
-    onChange([
-      ...currentBlocks,
-      {
-        id: makeId("block"),
-        type,
-        text: type === "image" || type === "video" ? "" : "本文を入力",
-        caption: "",
-      },
-    ]);
+  function focusEditor() {
+    editorRef.current?.focus();
   }
 
-  function removeBlock(id: string) {
-    onChange(currentBlocks.filter((block) => block.id !== id));
+  function runCommand(command: string, value?: string) {
+    focusEditor();
+    document.execCommand(command, false, value);
+    saveEditorHtml();
   }
 
-  function moveBlock(id: string, direction: -1 | 1) {
-    const index = currentBlocks.findIndex((block) => block.id === id);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= currentBlocks.length) return;
-    const nextBlocks = [...currentBlocks];
-    [nextBlocks[index], nextBlocks[nextIndex]] = [nextBlocks[nextIndex], nextBlocks[index]];
-    onChange(nextBlocks);
+  function setBlock(tagName: "P" | "H2" | "H3" | "BLOCKQUOTE") {
+    runCommand("formatBlock", tagName);
+  }
+
+  function insertHtml(nextHtml: string) {
+    focusEditor();
+    document.execCommand("insertHTML", false, nextHtml);
+    saveEditorHtml();
+  }
+
+  function insertImage() {
+    document.getElementById("rich-image-upload")?.click();
+  }
+
+  function insertVideo() {
+    const url = window.prompt("YouTubeなどの動画URLを入力してください");
+    if (!url?.trim() || !isSafeMediaUrl(url.trim())) return;
+    insertHtml(`<figure><iframe src="${escapeHtml(toEmbedUrl(url.trim()))}" title="動画" allowfullscreen></iframe><figcaption></figcaption></figure><p><br></p>`);
+  }
+
+  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
+    const imageFile = Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/"));
+    if (!imageFile) return;
+    event.preventDefault();
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) return;
+      insertHtml(`<figure><img src="${result}" alt="貼り付け画像"><figcaption></figcaption></figure><p><br></p>`);
+    };
+    reader.readAsDataURL(imageFile);
+  }
+
+  function handleImageUpload(files: FileList | null) {
+    const file = files?.[0];
+    if (!file?.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) return;
+      insertHtml(`<figure><img src="${result}" alt="${escapeHtml(file.name)}"><figcaption></figcaption></figure><p><br></p>`);
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
-    <div className="rich-editor">
-      <div className="rich-editor-add">
-        <button type="button" onClick={() => addBlock("paragraph")}>本文</button>
-        <button type="button" onClick={() => addBlock("heading")}>見出し</button>
-        <button type="button" onClick={() => addBlock("subheading")}>小見出し</button>
-        <button type="button" onClick={() => addBlock("quote")}>引用</button>
-        <button type="button" onClick={() => addBlock("image")}>画像</button>
-        <button type="button" onClick={() => addBlock("video")}>動画</button>
+    <div className="free-rich-editor">
+      <div className="free-rich-toolbar" aria-label="本文編集ツール">
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("P")}>本文</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("H2")}>見出し</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("H3")}>小見出し</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("BLOCKQUOTE")}>引用</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")}>太字</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("italic")}>斜体</button>
+        <label className="free-rich-color">
+          文字色
+          <input type="color" defaultValue="#172026" onChange={(event) => runCommand("foreColor", event.target.value)} />
+        </label>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertUnorderedList")}>箇条書き</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertImage}>画像</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertVideo}>動画</button>
+        <input
+          id="rich-image-upload"
+          hidden
+          type="file"
+          accept="image/*"
+          onChange={(event) => {
+            handleImageUpload(event.target.files);
+            event.target.value = "";
+          }}
+        />
       </div>
-      {currentBlocks.map((block) => (
-        <div className="rich-editor-block" key={block.id}>
-          <div className="rich-editor-row">
-            <select value={block.type} onChange={(event) => updateBlock(block.id, { type: event.target.value as ContentBlock["type"] })}>
-              <option value="paragraph">本文</option>
-              <option value="heading">見出し</option>
-              <option value="subheading">小見出し</option>
-              <option value="quote">引用</option>
-              <option value="image">画像</option>
-              <option value="video">動画</option>
-            </select>
-            <button type="button" onClick={() => moveBlock(block.id, -1)}>↑</button>
-            <button type="button" onClick={() => moveBlock(block.id, 1)}>↓</button>
-            <button type="button" onClick={() => removeBlock(block.id)}>削除</button>
-          </div>
-          {block.type === "paragraph" || block.type === "quote" ? (
-            <textarea value={block.text} onChange={(event) => updateBlock(block.id, { text: event.target.value })} />
-          ) : (
-            <input
-              value={block.text}
-              onChange={(event) => updateBlock(block.id, { text: event.target.value })}
-              placeholder={block.type === "image" ? "画像URL" : block.type === "video" ? "YouTubeなどの動画URL" : "テキスト"}
-            />
-          )}
-          {(block.type === "image" || block.type === "video") && (
-            <input value={block.caption ?? ""} onChange={(event) => updateBlock(block.id, { caption: event.target.value })} placeholder="キャプション" />
-          )}
-        </div>
-      ))}
-      <p>太字は **このように** 入力できます。</p>
+      <div
+        className="free-rich-surface"
+        contentEditable
+        onBlur={() => saveEditorHtml()}
+        onInput={() => {
+          latestHtmlRef.current = editorRef.current?.innerHTML ?? "";
+        }}
+        onPaste={handlePaste}
+        ref={(element) => {
+          editorRef.current = element;
+          if (element && !element.innerHTML) {
+            element.innerHTML = sanitizeRichHtml(latestHtmlRef.current);
+          }
+        }}
+        role="textbox"
+        suppressContentEditableWarning
+        aria-label="詳細ページ本文"
+      />
+    </div>
+  );
+}
+
+function RelatedCardsSection({
+  cards,
+  onOpenRecord,
+}: {
+  cards: KnowledgeCard[];
+  onOpenRecord: (record: EditableRecord) => void;
+}) {
+  if (cards.length === 0) return null;
+  return (
+    <div className="references">
+      <h3>関連項目</h3>
+      <div className="record-group-grid" style={{ marginTop: "1rem" }}>
+        {cards.map((card) => (
+          <button
+            className={`person-card compact record-card has-label ${card.type}-record-card`}
+            key={`${card.type}-${card.id}`}
+            onClick={() => onOpenRecord({ type: card.type, id: card.id })}
+            type="button"
+          >
+            <div className="person-thumb">
+              {card.type === "event" ? <CalendarDays size={22} /> : card.type === "person" ? <UserRound size={22} /> : <BookOpen size={22} />}
+            </div>
+            <span className="record-card-label">{card.label}</span>
+            <span>{card.title}</span>
+            <small>{card.meta}</small>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2351,17 +3099,21 @@ function DetailPanel({
   event,
   person,
   term,
+  termCards,
+  allCards,
   onClose,
   onOpenRecord,
   editMode,
   onEditModeChange,
   categories,
   termCategories,
+  personCategories,
   genres,
   countries,
   regions,
   onUpdateEvent,
   onUpdatePerson,
+  onUpdatePersonWorks,
   onUpdateTerm,
   onDeleteEvent,
   onDeletePerson,
@@ -2373,17 +3125,21 @@ function DetailPanel({
   event: Event | null;
   person: Person | null;
   term: TermCard | null;
+  termCards: TermCard[];
+  allCards: KnowledgeCard[];
   onClose: () => void;
   onOpenRecord: (record: EditableRecord) => void;
   editMode: boolean;
   onEditModeChange: (value: boolean) => void;
   categories: Category[];
   termCategories: string[];
+  personCategories: string[];
   genres: string[];
   countries: Country[];
   regions: Region[];
   onUpdateEvent: (id: string, patch: Partial<Event>) => void;
   onUpdatePerson: (id: string, patch: Partial<Person>) => void;
+  onUpdatePersonWorks: (id: string, works: string[]) => void;
   onUpdateTerm: (id: string, patch: Partial<TermCard>) => void;
   onDeleteEvent: (id: string) => void;
   onDeletePerson: (id: string) => void;
@@ -2393,6 +3149,49 @@ function DetailPanel({
   termPopup: TermPopup | null;
 }) {
   const [heroOrientation, setHeroOrientation] = useState<"landscape" | "portrait">("landscape");
+  const [eventPreviewTab, setEventPreviewTab] = useState<"summary" | "learning" | "references" | "related">("summary");
+  const [personPreviewTab, setPersonPreviewTab] = useState<"summary" | "learning" | "episodes" | "works" | "references" | "related">("summary");
+  const [termPreviewTab, setTermPreviewTab] = useState<"summary" | "learning" | "references" | "related">("summary");
+
+  const relatedCards = useMemo(() => {
+    const currentRecord = event || person || term;
+    const currentId = currentRecord?.id;
+    if (!currentId) return [];
+
+    const fullText = [
+      currentRecord.summary,
+      "detail" in currentRecord ? currentRecord.detail : "",
+      ...(currentRecord.contentBlocks ?? []).map((b) => b.text),
+      ...("episodeBlocks" in currentRecord ? (currentRecord.episodeBlocks ?? []).map((b) => b.text) : []),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (!fullText) return [];
+
+    return allCards.filter((card) => {
+      if (card.id === currentId) return false;
+      if (fullText.includes(card.title)) return true;
+      if ((card.aliases ?? []).some((alias) => fullText.includes(alias))) return true;
+      if (card.type === "term") {
+        const t = termCards.find((tc) => tc.id === card.id);
+        if (t && t.aliases.some((alias) => fullText.includes(alias))) return true;
+      }
+      return false;
+    });
+  }, [event, person, term, allCards, termCards]);
+
+  useEffect(() => {
+    setPersonPreviewTab("summary");
+  }, [person?.id]);
+
+  useEffect(() => {
+    setEventPreviewTab("summary");
+  }, [event?.id]);
+
+  useEffect(() => {
+    setTermPreviewTab("summary");
+  }, [term?.id]);
 
   return (
     <aside className="detail-panel" aria-label="詳細編集">
@@ -2456,15 +3255,57 @@ function DetailPanel({
               </div>
             )}
             <HashtagList values={event.genres} />
-            <p>{renderLinkedText(event.detail, event.terms)}</p>
-            <RichContentView blocks={event.contentBlocks} />
-            {(event.references ?? []).length > 0 && (
-              <div className="references">
-                <h3>参考資料</h3>
-                {(event.references ?? []).map((reference) => (
-                  <p key={reference}>{reference}</p>
-                ))}
-              </div>
+            <div className="person-preview-tabs">
+              {[
+                ["summary", "まとめ"],
+                ["learning", "学習"],
+                ["references", "参考資料"],
+                ["related", "関連項目"],
+              ].map(([id, label]) => (
+                <button
+                  className={eventPreviewTab === id ? "active" : ""}
+                  key={id}
+                  type="button"
+                  onClick={() => setEventPreviewTab(id as typeof eventPreviewTab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {eventPreviewTab === "summary" && (
+              <section className="person-detail-section">
+                <h3>概要</h3>
+                <p>{renderLinkedText(event.detail, event.terms)}</p>
+                <h3>本文</h3>
+                <RichContentView blocks={event.contentBlocks} />
+              </section>
+            )}
+            {eventPreviewTab === "learning" && (
+              <section className="person-detail-section">
+                <LearningFilesView files={event.learningFiles} />
+              </section>
+            )}
+            {eventPreviewTab === "references" && (
+              <section className="person-detail-section">
+                {(event.references ?? []).length > 0 ? (
+                  <div className="references inline-references">
+                    {(event.references ?? []).map((reference) => (
+                      <p key={reference}>{reference}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p>参考資料はまだ登録されていません。</p>
+                )}
+              </section>
+            )}
+            {eventPreviewTab === "related" && (
+              <section className="person-detail-section">
+                {relatedCards.length > 0 ? (
+                  <RelatedCardsSection cards={relatedCards} onOpenRecord={onOpenRecord} />
+                ) : (
+                  <p>関連項目はまだありません。</p>
+                )}
+              </section>
             )}
           </section>
 
@@ -2474,6 +3315,12 @@ function DetailPanel({
                 出来事名
                 <input value={event.title} onChange={(input) => onUpdateEvent(event.id, { title: input.target.value })} />
               </label>
+              <ChipEditor
+                label="別名"
+                values={event.aliases ?? []}
+                onChange={(values) => onUpdateEvent(event.id, { aliases: values })}
+                placeholder="例: 世界大戦"
+              />
               <div className="date-fields">
                 <HistoricalDateInput label="開始年月日" value={event.startDate} onChange={(value) => onUpdateEvent(event.id, { startDate: value ?? "" })} />
                 <HistoricalDateInput label="終了年月日" value={event.endDate} onChange={(value) => onUpdateEvent(event.id, { endDate: value })} allowEmpty />
@@ -2537,10 +3384,11 @@ function DetailPanel({
               </label>
               <label>
                 詳細ページ本文
-                <RichContentEditor blocks={event.contentBlocks} onChange={(blocks) => onUpdateEvent(event.id, { contentBlocks: blocks })} />
+                <RichContentEditor editorKey={`event-${event.id}-content`} blocks={event.contentBlocks} onChange={(blocks) => onUpdateEvent(event.id, { contentBlocks: blocks })} />
               </label>
               <ChipEditor label="紐付ける単語" values={event.terms} onChange={(values) => onUpdateEvent(event.id, { terms: values })} placeholder="例: 第一次世界大戦" />
-              <ChipEditor label="画像URL" values={event.imageUrls ?? []} onChange={(values) => onUpdateEvent(event.id, { imageUrls: values })} placeholder="画像URLを追加" />
+              <ImageUploadEditor label="プレビュー画像" values={event.imageUrls ?? []} onChange={(values) => onUpdateEvent(event.id, { imageUrls: values })} />
+              <LearningFilesEditor values={event.learningFiles ?? []} onChange={(values) => onUpdateEvent(event.id, { learningFiles: values })} />
               <ChipEditor label="参考資料" values={event.references ?? []} onChange={(values) => onUpdateEvent(event.id, { references: values })} placeholder="資料名・URLを追加" />
               <button className="delete-card-button" type="button" onClick={() => onDeleteEvent(event.id)}>
                 この出来事を削除
@@ -2567,87 +3415,174 @@ function DetailPanel({
                 </small>
               </div>
             </div>
-            <p>{renderLinkedText(person.summary, [...person.affiliations, ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])}</p>
-            <RichContentView blocks={person.contentBlocks} />
-            <HashtagList values={person.genres} />
-            {(person.references ?? []).length > 0 && (
-              <div className="references">
-                <h3>参考資料</h3>
-                {(person.references ?? []).map((reference) => (
-                  <p key={reference}>{reference}</p>
-                ))}
-              </div>
+            <HashtagList values={getPersonCategories(person)} />
+            <div className="person-preview-tabs">
+              {[
+                ["summary", "まとめ"],
+                ["learning", "学習"],
+                ["episodes", "エピソード"],
+                ["works", "主な著作"],
+                ["references", "参考資料"],
+                ["related", "関連項目"],
+              ].map(([id, label]) => (
+                <button
+                  className={personPreviewTab === id ? "active" : ""}
+                  key={id}
+                  type="button"
+                  onClick={() => setPersonPreviewTab(id as typeof personPreviewTab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {personPreviewTab === "summary" && (
+              <section className="person-detail-section">
+                <h3>概要</h3>
+                <p>{renderLinkedText(person.summary, [...getPersonCategories(person), ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])}</p>
+                <h3>本文</h3>
+                <RichContentView blocks={person.contentBlocks} />
+              </section>
+            )}
+            {personPreviewTab === "learning" && (
+              <section className="person-detail-section">
+                <LearningFilesView files={person.learningFiles} />
+              </section>
+            )}
+            {personPreviewTab === "episodes" && (
+              <section className="person-detail-section">
+                {(person.episodeBlocks ?? []).length > 0 ? <RichContentView blocks={person.episodeBlocks} /> : <p>エピソードはまだ登録されていません。</p>}
+              </section>
+            )}
+            {personPreviewTab === "works" && (
+              <section className="person-detail-section">
+                <div className="work-card-list">
+                  {(person.majorWorks ?? []).map((work) => (
+                    <button
+                      key={work}
+                      type="button"
+                      onClick={() => {
+                        const workTerm = termCards.find((term) => term.term === work || term.aliases.includes(work));
+                        if (workTerm) onOpenRecord({ type: "term", id: workTerm.id });
+                      }}
+                    >
+                      {work}
+                    </button>
+                  ))}
+                </div>
+                {(person.majorWorks ?? []).length === 0 && <p>主な著作はまだ登録されていません。</p>}
+              </section>
+            )}
+            {personPreviewTab === "references" && (
+              <section className="person-detail-section">
+                {(person.references ?? []).length > 0 ? (
+                  <div className="references inline-references">
+                    {(person.references ?? []).map((reference) => (
+                      <p key={reference}>{reference}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p>参考資料はまだ登録されていません。</p>
+                )}
+              </section>
+            )}
+            {personPreviewTab === "related" && (
+              <section className="person-detail-section">
+                {relatedCards.length > 0 ? (
+                  <RelatedCardsSection cards={relatedCards} onOpenRecord={onOpenRecord} />
+                ) : (
+                  <p>関連項目はまだありません。</p>
+                )}
+              </section>
             )}
           </section>
 
           {editMode && (
             <div className="detail-form">
-              <label>
-                人物名
-                <input value={person.name} onChange={(input) => onUpdatePerson(person.id, { name: input.target.value })} />
-              </label>
-              <div className="date-fields">
-                <HistoricalDateInput
-                  label="生年月日"
-                  value={person.birthDate ?? `${person.birthYear}-01-01`}
-                  onChange={(value) =>
-                    onUpdatePerson(person.id, {
-                      birthDate: value,
-                      birthYear: value ? toYear(value) : 0,
-                    })
-                  }
+              <ImageUploadEditor label="プレビュー画像" values={person.imageUrls ?? []} onChange={(values) => onUpdatePerson(person.id, { imageUrls: values })} />
+              <LearningFilesEditor values={person.learningFiles ?? []} onChange={(values) => onUpdatePerson(person.id, { learningFiles: values })} />
+              <details className="edit-section" open>
+                <summary>基本情報</summary>
+                <label>
+                  人物名
+                  <input value={person.name} onChange={(input) => onUpdatePerson(person.id, { name: input.target.value })} />
+                </label>
+                <ChipEditor
+                  label="別名"
+                  values={person.aliases ?? []}
+                  onChange={(values) => onUpdatePerson(person.id, { aliases: values })}
+                  placeholder="例: カント"
                 />
-                <HistoricalDateInput
-                  label="没年月日"
-                  value={person.deathDate ?? `${person.deathYear}-12-31`}
-                  onChange={(value) =>
-                    onUpdatePerson(person.id, {
-                      deathDate: value,
-                      deathYear: value ? toYear(value) : 0,
-                    })
-                  }
+                <div className="date-fields">
+                  <HistoricalDateInput
+                    label="生年月日"
+                    value={person.birthDate ?? serializeHistoricalYear(person.birthYear)}
+                    onChange={(value) =>
+                      onUpdatePerson(person.id, {
+                        birthDate: value,
+                        birthYear: value ? toYear(value) : 0,
+                      })
+                    }
+                  />
+                  <HistoricalDateInput
+                    label="没年月日"
+                    value={person.deathDate ?? serializeHistoricalYear(person.deathYear)}
+                    onChange={(value) =>
+                      onUpdatePerson(person.id, {
+                        deathDate: value,
+                        deathYear: value ? toYear(value) : 0,
+                      })
+                    }
+                  />
+                </div>
+                <ChipEditor
+                  label="カテゴリ"
+                  values={getPersonCategories(person)}
+                  onChange={(values) => onUpdatePerson(person.id, { affiliations: values, genres: values })}
+                  options={personCategories.map((category) => ({ value: category, label: category }))}
+                  placeholder="例: 政治家"
                 />
-              </div>
-              <ChipEditor label="所属・紐付ける単語" values={person.affiliations} onChange={(values) => onUpdatePerson(person.id, { affiliations: values })} placeholder="例: ハプスブルク家" />
-              <ChipEditor
-                label="ジャンル"
-                values={person.genres ?? []}
-                onChange={(values) => onUpdatePerson(person.id, { genres: values })}
-                options={genres.map((genre) => ({ value: genre, label: genre }))}
-                placeholder="例: 政治家"
-              />
-              <ChipEditor
-                label="国"
-                values={getRecordCountryIds(person)}
-                onChange={(values) => onUpdatePerson(person.id, { countryIds: values })}
-                options={countries.map((country) => ({ value: country.id, label: country.name }))}
-                placeholder="国を選択"
-                renderValue={(value) => getCountryName(countries, value)}
-                createValue={onResolveCountry}
-              />
-              <ChipEditor
-                label="地域・ピン"
-                values={getRecordRegionIds(person)}
-                onChange={(values) => onUpdatePerson(person.id, { regionIds: values })}
-                options={regions.map((region) => ({ value: region.id, label: `${getCountryName(countries, region.countryId)} / ${region.name}` }))}
-                placeholder="地域を選択"
-                renderValue={(value) => getRegionName(regions, value)}
-                allowCustom={false}
-              />
-              <label>
-                概要
-                <textarea
-                  className="large-text"
-                  value={person.summary}
-                  onChange={(input) => onUpdatePerson(person.id, { summary: input.target.value })}
+                <ChipEditor
+                  label="国"
+                  values={getRecordCountryIds(person)}
+                  onChange={(values) => onUpdatePerson(person.id, { countryIds: values, regionIds: [] })}
+                  options={countries.map((country) => ({ value: country.id, label: country.name }))}
+                  placeholder="国を選択"
+                  renderValue={(value) => getCountryName(countries, value)}
+                  createValue={onResolveCountry}
                 />
-              </label>
-              <label>
-                詳細ページ本文
-                <RichContentEditor blocks={person.contentBlocks} onChange={(blocks) => onUpdatePerson(person.id, { contentBlocks: blocks })} />
-              </label>
-              <ChipEditor label="画像URL" values={person.imageUrls ?? []} onChange={(values) => onUpdatePerson(person.id, { imageUrls: values })} placeholder="画像URLを追加" />
-              <ChipEditor label="参考資料" values={person.references ?? []} onChange={(values) => onUpdatePerson(person.id, { references: values })} placeholder="資料名・URLを追加" />
+              </details>
+              <details className="edit-section" open>
+                <summary>まとめ</summary>
+                <label>
+                  まとめ
+                  <textarea
+                    className="large-text"
+                    value={person.summary}
+                    onChange={(input) => onUpdatePerson(person.id, { summary: input.target.value })}
+                  />
+                </label>
+                <label>
+                  本文
+                  <RichContentEditor editorKey={`person-${person.id}-content`} blocks={person.contentBlocks} onChange={(blocks) => onUpdatePerson(person.id, { contentBlocks: blocks })} />
+                </label>
+              </details>
+              <details className="edit-section">
+                <summary>主な著作</summary>
+                <ChipEditor
+                  label="主な著作"
+                  values={person.majorWorks ?? []}
+                  onChange={(values) => onUpdatePersonWorks(person.id, values)}
+                  placeholder="例: 国家"
+                />
+              </details>
+              <details className="edit-section">
+                <summary>エピソード</summary>
+                <RichContentEditor editorKey={`person-${person.id}-episodes`} blocks={person.episodeBlocks} onChange={(blocks) => onUpdatePerson(person.id, { episodeBlocks: blocks })} />
+              </details>
+              <details className="edit-section">
+                <summary>参考資料</summary>
+                <ChipEditor label="参考資料" values={person.references ?? []} onChange={(values) => onUpdatePerson(person.id, { references: values })} placeholder="資料名・URLを追加" />
+              </details>
               <button className="delete-card-button" type="button" onClick={() => onDeletePerson(person.id)}>
                 この人物を削除
               </button>
@@ -2673,16 +3608,58 @@ function DetailPanel({
                 </small>
               </div>
             </div>
-            <p>{renderLinkedText(term.detail, term.relatedTerms)}</p>
-            <RichContentView blocks={term.contentBlocks} />
             <HashtagList values={term.genres} />
-            {(term.references ?? []).length > 0 && (
-              <div className="references">
-                <h3>参考資料</h3>
-                {(term.references ?? []).map((reference) => (
-                  <p key={reference}>{reference}</p>
-                ))}
-              </div>
+            <div className="person-preview-tabs">
+              {[
+                ["summary", "まとめ"],
+                ["learning", "学習"],
+                ["references", "参考資料"],
+                ["related", "関連項目"],
+              ].map(([id, label]) => (
+                <button
+                  className={termPreviewTab === id ? "active" : ""}
+                  key={id}
+                  type="button"
+                  onClick={() => setTermPreviewTab(id as typeof termPreviewTab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {termPreviewTab === "summary" && (
+              <section className="person-detail-section">
+                <h3>概要</h3>
+                <p>{renderLinkedText(term.detail, term.relatedTerms)}</p>
+                <h3>本文</h3>
+                <RichContentView blocks={term.contentBlocks} />
+              </section>
+            )}
+            {termPreviewTab === "learning" && (
+              <section className="person-detail-section">
+                <LearningFilesView files={term.learningFiles} />
+              </section>
+            )}
+            {termPreviewTab === "references" && (
+              <section className="person-detail-section">
+                {(term.references ?? []).length > 0 ? (
+                  <div className="references inline-references">
+                    {(term.references ?? []).map((reference) => (
+                      <p key={reference}>{reference}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p>参考資料はまだ登録されていません。</p>
+                )}
+              </section>
+            )}
+            {termPreviewTab === "related" && (
+              <section className="person-detail-section">
+                {relatedCards.length > 0 ? (
+                  <RelatedCardsSection cards={relatedCards} onOpenRecord={onOpenRecord} />
+                ) : (
+                  <p>関連項目はまだありません。</p>
+                )}
+              </section>
             )}
           </section>
 
@@ -2728,10 +3705,11 @@ function DetailPanel({
               </label>
               <label>
                 詳細ページ本文
-                <RichContentEditor blocks={term.contentBlocks} onChange={(blocks) => onUpdateTerm(term.id, { contentBlocks: blocks })} />
+                <RichContentEditor editorKey={`term-${term.id}-content`} blocks={term.contentBlocks} onChange={(blocks) => onUpdateTerm(term.id, { contentBlocks: blocks })} />
               </label>
               <ChipEditor label="紐付ける単語" values={term.relatedTerms} onChange={(values) => onUpdateTerm(term.id, { relatedTerms: values })} placeholder="例: ポリス" />
-              <ChipEditor label="画像URL" values={term.imageUrls ?? []} onChange={(values) => onUpdateTerm(term.id, { imageUrls: values })} placeholder="画像URLを追加" />
+              <ImageUploadEditor label="プレビュー画像" values={term.imageUrls ?? []} onChange={(values) => onUpdateTerm(term.id, { imageUrls: values })} />
+              <LearningFilesEditor values={term.learningFiles ?? []} onChange={(values) => onUpdateTerm(term.id, { learningFiles: values })} />
               <ChipEditor label="参考資料" values={term.references ?? []} onChange={(values) => onUpdateTerm(term.id, { references: values })} placeholder="資料名・URLを追加" />
               <button className="delete-card-button" type="button" onClick={() => onDeleteTerm(term.id)}>
                 この単語カードを削除
