@@ -1140,7 +1140,7 @@ function App() {
     async function syncFromRemote() {
       if (document.visibilityState === "hidden") return;
       if (activeRecord || detailEditMode) return;
-      if (Date.now() - lastLocalChangeAtRef.current < 2500) return;
+      if (Date.now() - lastLocalChangeAtRef.current < 1500) return;
 
       try {
         const response = await fetch("/api/data", { headers: { accept: "application/json" } });
@@ -1155,7 +1155,7 @@ function App() {
       }
     }
 
-    const interval = window.setInterval(syncFromRemote, 20000);
+    const interval = window.setInterval(syncFromRemote, 3000);
     window.addEventListener("focus", syncFromRemote);
     document.addEventListener("visibilitychange", syncFromRemote);
 
