@@ -24,8 +24,17 @@ export default async (request) => {
     if (request.method === "PUT") {
       const body = await request.json();
       const savedAt = new Date().toISOString();
+      const previousData = await store.get("main", { type: "json" });
+      const previousSavedAt = previousData?.savedAt ?? null;
+      const baseSavedAt = body?.baseSavedAt ?? null;
+      if (previousSavedAt && baseSavedAt !== previousSavedAt) {
+        return jsonResponse(409, {
+          error: "Outdated data",
+          message: "The production database has newer data.",
+          current: previousData,
+        });
+      }
       try {
-        const previousData = await store.get("main", { type: "json" });
         if (previousData) {
           await store.setJSON(`backups/${savedAt}`, previousData);
         }
@@ -34,6 +43,7 @@ export default async (request) => {
       }
       await store.setJSON("main", {
         ...body,
+        baseSavedAt: undefined,
         savedAt,
       });
       return jsonResponse(200, { ok: true, savedAt });

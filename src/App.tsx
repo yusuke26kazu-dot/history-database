@@ -65,6 +65,7 @@ type PersistedDatabase = {
   customCategories: Category[];
   customGenres: string[];
   savedAt?: string;
+  baseSavedAt?: string | null;
 };
 const currentDatabaseVersion = 2;
 type EventPlacement = {
@@ -810,6 +811,8 @@ function App() {
   const lastRemoteSavedAtRef = useRef<string | null>(null);
   const lastLocalChangeAtRef = useRef(0);
   const isApplyingRemoteRef = useRef(false);
+  const activeRecordRef = useRef<EditableRecord | null>(null);
+  const detailEditModeRef = useRef(false);
   const latestDatabaseStateRef = useRef({
     events,
     people,
@@ -829,6 +832,8 @@ function App() {
     customCategories,
     customGenres,
   };
+  activeRecordRef.current = activeRecord;
+  detailEditModeRef.current = detailEditMode;
 
   const timelineItems = useMemo(() => buildTimelineItems(people, events, personEvents), [people, events]);
   const categories = useMemo(
@@ -1117,11 +1122,27 @@ function App() {
         const response = await fetch("/api/data", {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(data),
+          body: JSON.stringify({
+            ...data,
+            baseSavedAt: lastRemoteSavedAtRef.current,
+          }),
         });
         if (response.ok) {
           const result = (await response.json()) as { savedAt?: string };
           if (result.savedAt) lastRemoteSavedAtRef.current = result.savedAt;
+        }
+        if (response.status === 409) {
+          const result = (await response.json()) as { current?: PersistedDatabase };
+          if (result.current?.savedAt) {
+            lastRemoteSavedAtRef.current = result.current.savedAt;
+            if (!activeRecordRef.current && !detailEditModeRef.current) {
+              applyPersistedDatabase(result.current);
+              setSaveStatus("本番の新しいデータを優先しました");
+              return;
+            }
+          }
+          setSaveStatus("本番に新しいデータあり");
+          return;
         }
         setSaveStatus(response.ok ? "本番保存済み" : savedLocally ? "この端末のみ保存" : "保存失敗");
       } catch {
