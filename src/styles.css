@@ -3507,6 +3507,10 @@ textarea:focus {
   .save-status {
     justify-self: end;
     margin-top: 0;
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .header-block h1 {
@@ -3523,14 +3527,85 @@ textarea:focus {
     min-width: 0;
   }
 
-  .top-filter-panel {
+  .mobile-filter-toggle {
     display: none;
-    grid-template-columns: 1fr;
-    padding: 10px;
   }
 
-  .top-filter-panel.mobile-open {
-    display: grid;
+  .top-filter-panel {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    min-height: 76px;
+    border-top: 0;
+    border-bottom: 1px solid #dbe3e8;
+    background: #f8fbfc;
+    box-shadow: none;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 8px 10px 10px;
+    scrollbar-width: none;
+  }
+
+  .top-filter-panel::-webkit-scrollbar {
+    display: none;
+  }
+
+  .top-filter-panel .group-mode-control,
+  .top-filter-panel .filter-search-select {
+    flex: 0 0 168px;
+    min-width: 168px;
+    gap: 4px;
+  }
+
+  .top-filter-panel .group-mode-control > span,
+  .top-filter-panel .filter-search-select > span {
+    color: #5d6d76;
+    font-size: 0.66rem;
+  }
+
+  .top-filter-panel .group-mode-control > div {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .top-filter-panel .group-mode-control > div::-webkit-scrollbar {
+    display: none;
+  }
+
+  .top-filter-panel .group-mode-control button,
+  .top-filter-panel .filter-search-select > button,
+  .top-filter-panel .reset-button {
+    min-height: 36px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 6px 14px rgb(32 49 58 / 6%);
+    font-size: 0.76rem;
+  }
+
+  .top-filter-panel .filter-search-menu {
+    position: fixed;
+    top: auto;
+    right: 10px;
+    bottom: 12px;
+    left: 10px;
+    z-index: 9000;
+    max-height: 58dvh;
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgb(18 32 38 / 24%);
+  }
+
+  .top-filter-panel .filter-search-options {
+    max-height: 38dvh;
+  }
+
+  .top-filter-panel .reset-button {
+    flex: 0 0 auto;
+    align-self: end;
+    margin: 0;
+    padding: 0 14px;
   }
 
   .action-toolbar {
@@ -3586,17 +3661,30 @@ textarea:focus {
   }
 
   .timeline-board {
+    height: 100%;
+    min-height: 0;
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .timeline-scale {
+    position: sticky;
     width: var(--timeline-width);
     min-width: var(--timeline-width);
     margin-left: 0;
+    z-index: 12;
   }
 
   .timeline-grid {
     grid-template-columns: var(--timeline-width);
+    min-height: max(
+      calc(var(--era-height) + var(--total-country-lanes-height) + var(--person-row-height) + 56px),
+      calc(100dvh - 180px)
+    );
+  }
+
+  .lane-canvas {
+    min-height: inherit;
   }
 
   .lane-labels span {

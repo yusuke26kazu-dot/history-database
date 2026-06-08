@@ -807,6 +807,9 @@ function App() {
   const [hasLoadedSavedData, setHasLoadedSavedData] = useState(false);
   const [remoteSaveEnabled, setRemoteSaveEnabled] = useState(false);
   const [saveStatus, setSaveStatus] = useState("読み込み中");
+  const lastRemoteSavedAtRef = useRef<string | null>(null);
+  const lastLocalChangeAtRef = useRef(0);
+  const isApplyingRemoteRef = useRef(false);
   const latestDatabaseStateRef = useRef({
     events,
     people,
@@ -1041,6 +1044,7 @@ function App() {
     activeRecord?.type === "term" ? termCards.find((term) => term.id === activeRecord.id) ?? null : null;
 
   function applyPersistedDatabase(saved: PersistedDatabase) {
+    isApplyingRemoteRef.current = true;
     setEvents(mergeById(seedEvents.map(normalizeEvent), saved.events?.map(normalizeEvent)));
     setPeople(mergeById(seedPeople.map(normalizePerson), saved.people?.map(normalizePerson)));
     setTermCards(mergeById(seedTermCards.map(normalizeTermCard), saved.termCards?.map(normalizeTermCard)));
@@ -1048,6 +1052,9 @@ function App() {
     setRegions(mergeById(seedRegions, saved.regions));
     setCustomCategories(uniqueValues(saved.customCategories ?? []));
     setCustomGenres(uniqueValues(saved.customGenres ?? []));
+    window.setTimeout(() => {
+      isApplyingRemoteRef.current = false;
+    }, 0);
   }
 
   useEffect(() => {
@@ -1058,6 +1065,7 @@ function App() {
         const response = await fetch("/api/data", { headers: { accept: "application/json" } });
         const remoteData = response.ok ? ((await response.json()) as PersistedDatabase | null) : null;
         if (!cancelled && response.ok) setRemoteSaveEnabled(true);
+        if (!cancelled && remoteData?.savedAt) lastRemoteSavedAtRef.current = remoteData.savedAt;
         const saved = remoteData ?? readLocalDatabase();
         if (!cancelled && saved) {
           applyPersistedDatabase(saved);
@@ -1090,6 +1098,7 @@ function App() {
 
   useEffect(() => {
     if (!hasLoadedSavedData) return;
+    if (!isApplyingRemoteRef.current) lastLocalChangeAtRef.current = Date.now();
     const data = createPersistedDatabase({
       events,
       people,
@@ -1100,7 +1109,7 @@ function App() {
       customGenres,
     });
     const savedLocally = writeLocalDatabase(data);
-    setSaveStatus(remoteSaveEnabled ? "保存中" : savedLocally ? "ブラウザ内保存" : "保存失敗");
+    setSaveStatus(remoteSaveEnabled ? "本番へ保存中" : savedLocally ? "この端末のみ保存" : "保存失敗");
 
     const timeout = window.setTimeout(async () => {
       if (!remoteSaveEnabled) return;
@@ -1110,14 +1119,53 @@ function App() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(data),
         });
-        setSaveStatus(response.ok ? "保存済み" : savedLocally ? "ブラウザ内保存" : "保存失敗");
+        if (response.ok) {
+          const result = (await response.json()) as { savedAt?: string };
+          if (result.savedAt) lastRemoteSavedAtRef.current = result.savedAt;
+        }
+        setSaveStatus(response.ok ? "本番保存済み" : savedLocally ? "この端末のみ保存" : "保存失敗");
       } catch {
-        setSaveStatus(savedLocally ? "ブラウザ内保存" : "保存失敗");
+        setSaveStatus(savedLocally ? "この端末のみ保存" : "保存失敗");
       }
     }, 700);
 
     return () => window.clearTimeout(timeout);
   }, [events, people, termCards, countries, regions, customCategories, customGenres, hasLoadedSavedData, remoteSaveEnabled]);
+
+  useEffect(() => {
+    if (!hasLoadedSavedData || !remoteSaveEnabled) return;
+
+    let cancelled = false;
+
+    async function syncFromRemote() {
+      if (document.visibilityState === "hidden") return;
+      if (activeRecord || detailEditMode) return;
+      if (Date.now() - lastLocalChangeAtRef.current < 2500) return;
+
+      try {
+        const response = await fetch("/api/data", { headers: { accept: "application/json" } });
+        const remoteData = response.ok ? ((await response.json()) as PersistedDatabase | null) : null;
+        if (cancelled || !remoteData?.savedAt) return;
+        if (remoteData.savedAt === lastRemoteSavedAtRef.current) return;
+        lastRemoteSavedAtRef.current = remoteData.savedAt;
+        applyPersistedDatabase(remoteData);
+        setSaveStatus("本番データを同期しました");
+      } catch {
+        // Keep the current screen as-is if the network is temporarily unavailable.
+      }
+    }
+
+    const interval = window.setInterval(syncFromRemote, 20000);
+    window.addEventListener("focus", syncFromRemote);
+    document.addEventListener("visibilitychange", syncFromRemote);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", syncFromRemote);
+      document.removeEventListener("visibilitychange", syncFromRemote);
+    };
+  }, [activeRecord, detailEditMode, hasLoadedSavedData, remoteSaveEnabled]);
 
   useEffect(() => {
     if (!hasLoadedSavedData) return;
