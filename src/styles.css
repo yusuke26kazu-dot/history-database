@@ -3587,12 +3587,12 @@ textarea:focus {
 
   .top-filter-panel .filter-search-menu {
     position: fixed;
-    top: auto;
+    top: 88px;
     right: 10px;
-    bottom: 12px;
+    bottom: auto;
     left: 10px;
     z-index: 9000;
-    max-height: 58dvh;
+    max-height: min(58dvh, calc(100dvh - 104px));
     border-radius: 14px;
     box-shadow: 0 20px 60px rgb(18 32 38 / 24%);
   }
@@ -3628,10 +3628,7 @@ textarea:focus {
   }
 
   .mobile-filter-toggle {
-    display: inline-flex;
-    border-color: #46c6ae;
-    background: #e3f7f2;
-    color: #117d6c;
+    display: none !important;
   }
 
   .timeline-board,
