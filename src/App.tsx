@@ -6,6 +6,7 @@ import {
   Filter,
   Library,
   ListTree,
+  Menu,
   MapPin,
   Plus,
   Rows3,
@@ -615,6 +616,34 @@ function writeLocalDatabase(data: PersistedDatabase) {
   }
 }
 
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadFileAsset(file: File) {
+  try {
+    const response = await fetch("/api/files", {
+      method: "POST",
+      headers: {
+        "content-type": file.type || "application/octet-stream",
+        "x-file-name": file.name,
+      },
+      body: file,
+    });
+    if (response.ok) {
+      const result = (await response.json()) as { url?: string };
+      if (result.url) return result.url;
+    }
+  } catch {
+    // Local Vite previews do not have Netlify Functions, so fall back to inline data.
+  }
+  return readFileAsDataUrl(file);
+}
+
 function blockText(blocks?: ContentBlock[]) {
   return (blocks ?? []).map((block) => `${stripHtml(block.text)} ${block.caption ?? ""}`).join(" ");
 }
@@ -778,6 +807,25 @@ function App() {
   const [hasLoadedSavedData, setHasLoadedSavedData] = useState(false);
   const [remoteSaveEnabled, setRemoteSaveEnabled] = useState(false);
   const [saveStatus, setSaveStatus] = useState("読み込み中");
+  const latestDatabaseStateRef = useRef({
+    events,
+    people,
+    termCards,
+    countries,
+    regions,
+    customCategories,
+    customGenres,
+  });
+
+  latestDatabaseStateRef.current = {
+    events,
+    people,
+    termCards,
+    countries,
+    regions,
+    customCategories,
+    customGenres,
+  };
 
   const timelineItems = useMemo(() => buildTimelineItems(people, events, personEvents), [people, events]);
   const categories = useMemo(
@@ -1070,6 +1118,21 @@ function App() {
 
     return () => window.clearTimeout(timeout);
   }, [events, people, termCards, countries, regions, customCategories, customGenres, hasLoadedSavedData, remoteSaveEnabled]);
+
+  useEffect(() => {
+    if (!hasLoadedSavedData) return;
+
+    function persistLatestLocalData() {
+      writeLocalDatabase(createPersistedDatabase(latestDatabaseStateRef.current));
+    }
+
+    window.addEventListener("pagehide", persistLatestLocalData);
+    window.addEventListener("beforeunload", persistLatestLocalData);
+    return () => {
+      window.removeEventListener("pagehide", persistLatestLocalData);
+      window.removeEventListener("beforeunload", persistLatestLocalData);
+    };
+  }, [hasLoadedSavedData]);
 
   function updateEvent(id: string, patch: Partial<Event>) {
     setEvents((current) => current.map((event) => (event.id === id ? { ...event, ...patch } : event)));
@@ -1408,6 +1471,8 @@ function App() {
     );
   }
 
+  const activeView = viewModes.find((view) => view.id === viewMode) ?? viewModes[0];
+
   return (
     <main className="app-shell">
       <section className="workspace">
@@ -1444,6 +1509,15 @@ function App() {
 
         <section className="database-area">
           <div className="top-bar">
+            <button
+              aria-label="ビュー選択を開く"
+              className="mobile-menu-button"
+              type="button"
+              onClick={() => setMobileFiltersOpen(true)}
+            >
+              <Menu size={18} />
+              <span>{activeView.label}</span>
+            </button>
             <span className="save-status">{saveStatus}</span>
             <div className="top-search-filter">
               <label className="top-search-box">
@@ -1454,6 +1528,14 @@ function App() {
                   onChange={(event) => setSearchQuery(event.target.value)}
                 />
               </label>
+              <button
+                className={`mobile-filter-toggle ${topFiltersOpen ? "active" : ""}`}
+                type="button"
+                onClick={() => setTopFiltersOpen((open) => !open)}
+              >
+                <Filter size={15} />
+                絞り込み
+              </button>
             </div>
             <div className="action-toolbar">
               <button type="button" onClick={addEvent}>
@@ -1477,7 +1559,7 @@ function App() {
               </button>
             </div>
           </div>
-          <div className="top-filter-panel">
+          <div className={`top-filter-panel ${topFiltersOpen ? "mobile-open" : ""}`}>
               {(viewMode === "category" || viewMode === "people" || viewMode === "terms") && (
                 <div className="group-mode-control">
                   <span>表示</span>
@@ -2919,16 +3001,7 @@ function ImageUploadEditor({
   function handleUpload(files: FileList | null) {
     const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
     if (imageFiles.length === 0) return;
-    Promise.all(
-      imageFiles.map(
-        (file) =>
-          new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-            reader.readAsDataURL(file);
-          }),
-      ),
-    ).then((results) => onChange(uniqueValues([...values, ...results.filter(Boolean)])));
+    Promise.all(imageFiles.map(uploadFileAsset)).then((results) => onChange(uniqueValues([...values, ...results.filter(Boolean)])));
   }
 
   return (
@@ -2982,6 +3055,15 @@ function dataUrlToBlob(dataUrl: string, fallbackMimeType: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
+async function learningFileToBytes(file: LearningFile) {
+  if (file.dataUrl.startsWith("data:")) {
+    return new Uint8Array(await dataUrlToBlob(file.dataUrl, file.mimeType).arrayBuffer());
+  }
+  const response = await fetch(file.dataUrl);
+  if (!response.ok) throw new Error("File could not be loaded");
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 async function loadPdfJs() {
   if (!pdfJsModulePromise) {
     const pdfJsUrl = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -3004,8 +3086,7 @@ function LearningPdfPreview({ file }: { file: LearningFile }) {
       setStatus("PDFをスライドとして読み込んでいます");
       try {
         const pdfjs = await loadPdfJs();
-        const pdfBlob = dataUrlToBlob(file.dataUrl, file.mimeType);
-        const pdfData = new Uint8Array(await pdfBlob.arrayBuffer());
+        const pdfData = await learningFileToBytes(file);
         const pdf = await pdfjs.getDocument({ data: pdfData }).promise;
         const renderedSlides: string[] = [];
 
@@ -3096,21 +3177,13 @@ function LearningFilesEditor({
     if (uploadFiles.length === 0) return;
 
     Promise.all(
-      uploadFiles.map(
-        (file) =>
-          new Promise<LearningFile>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () =>
-              resolve({
-                id: makeId("learning"),
-                name: file.name,
-                type: getLearningFileType(file),
-                mimeType: file.type || "application/octet-stream",
-                dataUrl: typeof reader.result === "string" ? reader.result : "",
-              });
-            reader.readAsDataURL(file);
-          }),
-      ),
+      uploadFiles.map(async (file) => ({
+        id: makeId("learning"),
+        name: file.name,
+        type: getLearningFileType(file),
+        mimeType: file.type || "application/octet-stream",
+        dataUrl: await uploadFileAsset(file),
+      })),
     ).then((results) => onChange([...values, ...results.filter((file) => file.dataUrl)]));
   }
 
@@ -3270,25 +3343,19 @@ function RichContentEditor({
     const imageFile = Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/"));
     if (!imageFile) return;
     event.preventDefault();
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
+    uploadFileAsset(imageFile).then((result) => {
       if (!result) return;
       insertHtml(`<figure><img src="${result}" alt="貼り付け画像"><figcaption></figcaption></figure><p><br></p>`);
-    };
-    reader.readAsDataURL(imageFile);
+    });
   }
 
   function handleImageUpload(files: FileList | null) {
     const file = files?.[0];
     if (!file?.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
+    uploadFileAsset(file).then((result) => {
       if (!result) return;
       insertHtml(`<figure><img src="${result}" alt="${escapeHtml(file.name)}"><figcaption></figcaption></figure><p><br></p>`);
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   return (
@@ -3322,9 +3389,7 @@ function RichContentEditor({
         className="free-rich-surface"
         contentEditable
         onBlur={() => saveEditorHtml()}
-        onInput={() => {
-          latestHtmlRef.current = editorRef.current?.innerHTML ?? "";
-        }}
+        onInput={() => saveEditorHtml()}
         onPaste={handlePaste}
         ref={(element) => {
           editorRef.current = element;
