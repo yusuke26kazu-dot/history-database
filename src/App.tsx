@@ -68,6 +68,7 @@ type PersistedDatabase = {
   baseSavedAt?: string | null;
 };
 const currentDatabaseVersion = 2;
+const maxInlineAssetLength = 1_500_000;
 type EventPlacement = {
   item: TimelineItem;
   lane: number;
@@ -576,6 +577,62 @@ function normalizeTermCard(term: TermCard): TermCard {
   };
 }
 
+function isOversizedInlineAsset(value: string) {
+  return value.startsWith("data:") && value.length > maxInlineAssetLength;
+}
+
+function compactAssetUrls(values?: string[]) {
+  return (values ?? []).filter((value) => !isOversizedInlineAsset(value));
+}
+
+function compactLearningFiles(values?: LearningFile[]) {
+  return (values ?? []).filter((file) => !isOversizedInlineAsset(file.dataUrl));
+}
+
+function compactContentBlocks(blocks?: ContentBlock[]) {
+  return (blocks ?? []).map((block) => {
+    if (block.type === "image" && isOversizedInlineAsset(block.text)) {
+      return { ...block, text: "" };
+    }
+    if (block.type !== "html" || !block.text.includes("data:")) return block;
+    const template = document.createElement("template");
+    template.innerHTML = block.text;
+    template.content.querySelectorAll("img").forEach((image) => {
+      const source = image.getAttribute("src") ?? "";
+      if (isOversizedInlineAsset(source)) image.remove();
+    });
+    return { ...block, text: template.innerHTML };
+  });
+}
+
+function compactEventForSave(event: Event): Event {
+  return {
+    ...normalizeEvent(event),
+    contentBlocks: compactContentBlocks(event.contentBlocks),
+    imageUrls: compactAssetUrls(event.imageUrls),
+    learningFiles: compactLearningFiles(event.learningFiles),
+  };
+}
+
+function compactPersonForSave(person: Person): Person {
+  return {
+    ...normalizePerson(person),
+    contentBlocks: compactContentBlocks(person.contentBlocks),
+    episodeBlocks: compactContentBlocks(person.episodeBlocks),
+    imageUrls: compactAssetUrls(person.imageUrls),
+    learningFiles: compactLearningFiles(person.learningFiles),
+  };
+}
+
+function compactTermForSave(term: TermCard): TermCard {
+  return {
+    ...normalizeTermCard(term),
+    contentBlocks: compactContentBlocks(term.contentBlocks),
+    imageUrls: compactAssetUrls(term.imageUrls),
+    learningFiles: compactLearningFiles(term.learningFiles),
+  };
+}
+
 function createPersistedDatabase(data: {
   events: Event[];
   people: Person[];
@@ -587,9 +644,9 @@ function createPersistedDatabase(data: {
 }): PersistedDatabase {
   return {
     version: currentDatabaseVersion,
-    events: data.events.map(normalizeEvent),
-    people: data.people.map(normalizePerson),
-    termCards: data.termCards.map(normalizeTermCard),
+    events: data.events.map(compactEventForSave),
+    people: data.people.map(compactPersonForSave),
+    termCards: data.termCards.map(compactTermForSave),
     countries: data.countries.map((country) => ({ ...country, aliases: country.aliases ?? [] })),
     regions: data.regions,
     customCategories: data.customCategories,
@@ -625,24 +682,77 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function isLocalPreview() {
+  return window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+}
+
+function imageToElement(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Image could not be loaded"));
+    };
+    image.src = url;
+  });
+}
+
+async function compressImageFile(file: File) {
+  if (!file.type.startsWith("image/")) return file;
+  const image = await imageToElement(file);
+  const maxSide = 1800;
+  const largestSide = Math.max(image.naturalWidth, image.naturalHeight);
+  if (largestSide <= maxSide && file.size <= 1_200_000) return file;
+
+  const scale = Math.min(1, maxSide / Math.max(largestSide, 1));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return file;
+  context.drawImage(image, 0, 0, width, height);
+
+  return new Promise<File>((resolve) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return resolve(file);
+        const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
+        resolve(new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() }));
+      },
+      "image/jpeg",
+      0.82,
+    );
+  });
+}
+
 async function uploadFileAsset(file: File) {
+  const uploadFile = await compressImageFile(file);
   try {
     const response = await fetch("/api/files", {
       method: "POST",
       headers: {
-        "content-type": file.type || "application/octet-stream",
-        "x-file-name": file.name,
+        "content-type": uploadFile.type || "application/octet-stream",
+        "x-file-name": uploadFile.name,
       },
-      body: file,
+      body: uploadFile,
     });
     if (response.ok) {
       const result = (await response.json()) as { url?: string };
       if (result.url) return result.url;
     }
   } catch {
-    // Local Vite previews do not have Netlify Functions, so fall back to inline data.
+    // Local Vite previews do not have Netlify Functions.
   }
-  return readFileAsDataUrl(file);
+  if (isLocalPreview()) return readFileAsDataUrl(uploadFile);
+  window.alert("ファイルの本番保存に失敗しました。画像は追加されませんでした。少し待ってからもう一度試してください。");
+  return "";
 }
 
 function blockText(blocks?: ContentBlock[]) {
