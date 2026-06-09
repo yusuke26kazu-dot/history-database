@@ -3861,40 +3861,32 @@ function DetailPanel({
                   placeholder="例: サラエボ"
                 />
               </label>
-              <div className="date-fields">
-                <label>
-                  緯度
-                  <input
-                    inputMode="decimal"
-                    value={typeof event.locationLat === "number" ? String(event.locationLat) : ""}
-                    onChange={(input) => {
-                      const value = input.target.value.trim();
-                      const latitude = value === "" ? undefined : Number(value);
+              <label>
+                発生座標
+                <input
+                  inputMode="decimal"
+                  value={hasCoordinates(event) ? `${event.locationLat}, ${event.locationLng}` : ""}
+                  onChange={(input) => {
+                    const value = input.target.value.trim();
+                    if (!value) {
                       onUpdateEvent(event.id, {
-                        locationLat: typeof latitude === "number" && Number.isFinite(latitude) ? latitude : undefined,
+                        locationLat: undefined,
+                        locationLng: undefined,
                         regionIds: [],
                       });
-                    }}
-                    placeholder="例: 37.957635"
-                  />
-                </label>
-                <label>
-                  経度
-                  <input
-                    inputMode="decimal"
-                    value={typeof event.locationLng === "number" ? String(event.locationLng) : ""}
-                    onChange={(input) => {
-                      const value = input.target.value.trim();
-                      const longitude = value === "" ? undefined : Number(value);
-                      onUpdateEvent(event.id, {
-                        locationLng: typeof longitude === "number" && Number.isFinite(longitude) ? longitude : undefined,
-                        regionIds: [],
-                      });
-                    }}
-                    placeholder="例: 23.550474"
-                  />
-                </label>
-              </div>
+                      return;
+                    }
+                    const coordinates = parseCoordinatePair(value);
+                    if (!coordinates) return;
+                    onUpdateEvent(event.id, {
+                      locationLat: coordinates.latitude,
+                      locationLng: coordinates.longitude,
+                      regionIds: [],
+                    });
+                  }}
+                  placeholder="例: 37.95763536001474, 23.55047471260841"
+                />
+              </label>
               <label>
                 簡単な概要
                 <textarea value={event.summary} onChange={(input) => onUpdateEvent(event.id, { summary: input.target.value })} />
