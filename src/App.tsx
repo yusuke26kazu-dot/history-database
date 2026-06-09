@@ -31,6 +31,11 @@ type TimelineLaneMode = "country" | "plain";
 type CardGroupMode = "all" | "category" | "country";
 type TermPopup = { term: string; definition: string; target?: EditableRecord };
 let pdfJsModulePromise: Promise<any> | null = null;
+type PersistedUiState = {
+  viewMode?: ViewMode;
+  cardGroupMode?: CardGroupMode;
+  activeRecord?: EditableRecord | null;
+};
 type KnowledgeCard = {
   id: string;
   type: EditableRecord["type"];
@@ -96,6 +101,8 @@ const viewModes: Array<{ id: ViewMode; label: string; icon: typeof Rows3 }> = [
   { id: "terms", label: "単語", icon: Library },
   { id: "cards", label: "全カード", icon: Library },
 ];
+const viewModeIds = viewModes.map((view) => view.id);
+const cardGroupModeIds: CardGroupMode[] = ["all", "category", "country"];
 
 const countryFlags: Record<string, string> = {
   "austria-hungary": "🇦🇹🇭🇺",
@@ -365,6 +372,16 @@ function getPersonCategories(person: Person) {
 
 function hasCoordinates(record: Event) {
   return typeof record.locationLat === "number" && typeof record.locationLng === "number";
+}
+
+function parseCoordinatePair(value: string | undefined) {
+  const match = value?.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*[,，]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!match) return undefined;
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return undefined;
+  return { latitude, longitude };
 }
 
 function normalizeLocationName(value: string) {
@@ -674,6 +691,35 @@ function writeLocalDatabase(data: PersistedDatabase) {
   }
 }
 
+function isEditableRecord(value: unknown): value is EditableRecord {
+  if (!value || typeof value !== "object") return false;
+  const record = value as EditableRecord;
+  return (record.type === "event" || record.type === "person" || record.type === "term") && typeof record.id === "string";
+}
+
+function readPersistedUiState(): PersistedUiState {
+  try {
+    const raw = window.localStorage.getItem("history-database:ui");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedUiState;
+    return {
+      viewMode: parsed.viewMode && viewModeIds.includes(parsed.viewMode) ? parsed.viewMode : undefined,
+      cardGroupMode: parsed.cardGroupMode && cardGroupModeIds.includes(parsed.cardGroupMode) ? parsed.cardGroupMode : undefined,
+      activeRecord: isEditableRecord(parsed.activeRecord) ? parsed.activeRecord : null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedUiState(state: PersistedUiState) {
+  try {
+    window.localStorage.setItem("history-database:ui", JSON.stringify(state));
+  } catch {
+    // UI position restore is a convenience feature; failure should not block editing.
+  }
+}
+
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve) => {
     const reader = new FileReader();
@@ -885,12 +931,17 @@ function getEventMapEmbedUrl(event: Event) {
 }
 
 function App() {
+  const initialUiStateRef = useRef<PersistedUiState | null>(null);
+  if (initialUiStateRef.current === null) {
+    initialUiStateRef.current = readPersistedUiState();
+  }
+  const initialUiState = initialUiStateRef.current;
   const [events, setEvents] = useState<Event[]>(seedEvents);
   const [people, setPeople] = useState<Person[]>(seedPeople);
   const [termCards, setTermCards] = useState<TermCard[]>(seedTermCards);
   const [countries, setCountries] = useState<Country[]>(seedCountries);
   const [regions, setRegions] = useState<Region[]>(seedRegions);
-  const [viewMode, setViewMode] = useState<ViewMode>("timeline");
+  const [viewMode, setViewMode] = useState<ViewMode>(initialUiState.viewMode ?? "timeline");
   const [categoryFilters, setCategoryFilters] = useState<Category[]>([]);
   const [eventGenreFilters, setEventGenreFilters] = useState<string[]>([]);
   const [personCategoryFilters, setPersonCategoryFilters] = useState<string[]>([]);
@@ -909,9 +960,9 @@ function App() {
   const [timelineZoom, setTimelineZoom] = useState(1);
   const [timelineHeightZoom, setTimelineHeightZoom] = useState(1.35);
   const [timelineLaneMode, setTimelineLaneMode] = useState<TimelineLaneMode>("plain");
-  const [cardGroupMode, setCardGroupMode] = useState<CardGroupMode>("all");
+  const [cardGroupMode, setCardGroupMode] = useState<CardGroupMode>(initialUiState.cardGroupMode ?? "all");
   const [showEraPeriods, setShowEraPeriods] = useState(true);
-  const [activeRecord, setActiveRecord] = useState<EditableRecord | null>(null);
+  const [activeRecord, setActiveRecord] = useState<EditableRecord | null>(initialUiState.activeRecord ?? null);
   const [termPopup, setTermPopup] = useState<TermPopup | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [topFiltersOpen, setTopFiltersOpen] = useState(false);
@@ -1312,6 +1363,14 @@ function App() {
       window.removeEventListener("beforeunload", persistLatestLocalData);
     };
   }, [hasLoadedSavedData]);
+
+  useEffect(() => {
+    writePersistedUiState({
+      viewMode,
+      cardGroupMode,
+      activeRecord,
+    });
+  }, [activeRecord, cardGroupMode, viewMode]);
 
   function updateEvent(id: string, patch: Partial<Event>) {
     setEvents((current) => current.map((event) => (event.id === id ? { ...event, ...patch } : event)));
@@ -2455,22 +2514,22 @@ function MapView({
         const countryIds = getRecordCountryIds(item);
         const countryId = countryIds[0];
         const countryNames = countryIds.map((id) => getCountryName(countries, id));
-        const dictionaryLocation = getDictionaryLocation(locationName, countryNames);
-        if (dictionaryLocation) {
-          return {
-            item,
-            locationName,
-            latitude: dictionaryLocation.latitude,
-            longitude: dictionaryLocation.longitude,
-            countryId,
-          };
-        }
-        if (locationName && hasCoordinates(item)) {
+        if (hasCoordinates(item)) {
           return {
             item,
             locationName,
             latitude: item.locationLat as number,
             longitude: item.locationLng as number,
+            countryId,
+          };
+        }
+        const typedCoordinates = parseCoordinatePair(locationName);
+        if (typedCoordinates) {
+          return {
+            item,
+            locationName,
+            latitude: typedCoordinates.latitude,
+            longitude: typedCoordinates.longitude,
             countryId,
           };
         }
@@ -2482,6 +2541,16 @@ function MapView({
             locationName,
             latitude: geocoded.latitude,
             longitude: geocoded.longitude,
+            countryId,
+          };
+        }
+        const dictionaryLocation = getDictionaryLocation(locationName, countryNames);
+        if (dictionaryLocation) {
+          return {
+            item,
+            locationName,
+            latitude: dictionaryLocation.latitude,
+            longitude: dictionaryLocation.longitude,
             countryId,
           };
         }
@@ -2504,8 +2573,18 @@ function MapView({
 
   useEffect(() => {
     items.forEach((item) => {
+      if (hasCoordinates(item)) return;
       const locationName = item.locationName?.trim();
       if (!locationName) return;
+      const typedCoordinates = parseCoordinatePair(locationName);
+      if (typedCoordinates) {
+        onUpdateEvent(item.id, {
+          locationLat: typedCoordinates.latitude,
+          locationLng: typedCoordinates.longitude,
+          regionIds: [],
+        });
+        return;
+      }
       const countryIds = getRecordCountryIds(item);
       const countryNames = countryIds.map((id) => getCountryName(countries, id));
       const dictionaryLocation = getDictionaryLocation(locationName, countryNames);
@@ -3885,6 +3964,40 @@ function DetailPanel({
                   placeholder="例: サラエボ"
                 />
               </label>
+              <div className="date-fields">
+                <label>
+                  緯度
+                  <input
+                    inputMode="decimal"
+                    value={typeof event.locationLat === "number" ? String(event.locationLat) : ""}
+                    onChange={(input) => {
+                      const value = input.target.value.trim();
+                      const latitude = value === "" ? undefined : Number(value);
+                      onUpdateEvent(event.id, {
+                        locationLat: typeof latitude === "number" && Number.isFinite(latitude) ? latitude : undefined,
+                        regionIds: [],
+                      });
+                    }}
+                    placeholder="例: 37.957635"
+                  />
+                </label>
+                <label>
+                  経度
+                  <input
+                    inputMode="decimal"
+                    value={typeof event.locationLng === "number" ? String(event.locationLng) : ""}
+                    onChange={(input) => {
+                      const value = input.target.value.trim();
+                      const longitude = value === "" ? undefined : Number(value);
+                      onUpdateEvent(event.id, {
+                        locationLng: typeof longitude === "number" && Number.isFinite(longitude) ? longitude : undefined,
+                        regionIds: [],
+                      });
+                    }}
+                    placeholder="例: 23.550474"
+                  />
+                </label>
+              </div>
               <label>
                 簡単な概要
                 <textarea value={event.summary} onChange={(input) => onUpdateEvent(event.id, { summary: input.target.value })} />
