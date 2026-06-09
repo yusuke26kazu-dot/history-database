@@ -699,6 +699,8 @@ function isEditableRecord(value: unknown): value is EditableRecord {
 
 function readPersistedUiState(): PersistedUiState {
   try {
+    const hashState = readUiStateFromHash();
+    if (hashState.viewMode || hashState.cardGroupMode || hashState.activeRecord) return hashState;
     const raw = window.localStorage.getItem("history-database:ui");
     if (!raw) return {};
     const parsed = JSON.parse(raw) as PersistedUiState;
@@ -712,9 +714,39 @@ function readPersistedUiState(): PersistedUiState {
   }
 }
 
+function readUiStateFromHash(): PersistedUiState {
+  try {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const viewMode = params.get("view");
+    const group = params.get("group");
+    const recordType = params.get("recordType");
+    const recordId = params.get("recordId");
+    return {
+      viewMode: viewMode && viewModeIds.includes(viewMode as ViewMode) ? (viewMode as ViewMode) : undefined,
+      cardGroupMode: group && cardGroupModeIds.includes(group as CardGroupMode) ? (group as CardGroupMode) : undefined,
+      activeRecord:
+        (recordType === "event" || recordType === "person" || recordType === "term") && recordId
+          ? { type: recordType, id: recordId }
+          : null,
+    };
+  } catch {
+    return {};
+  }
+}
+
 function writePersistedUiState(state: PersistedUiState) {
   try {
     window.localStorage.setItem("history-database:ui", JSON.stringify(state));
+    const params = new URLSearchParams();
+    if (state.viewMode) params.set("view", state.viewMode);
+    if (state.cardGroupMode) params.set("group", state.cardGroupMode);
+    if (state.activeRecord) {
+      params.set("recordType", state.activeRecord.type);
+      params.set("recordId", state.activeRecord.id);
+    }
+    const nextHash = params.toString();
+    const nextUrl = `${window.location.pathname}${window.location.search}${nextHash ? `#${nextHash}` : ""}`;
+    window.history.replaceState(null, "", nextUrl);
   } catch {
     // UI position restore is a convenience feature; failure should not block editing.
   }
@@ -2500,74 +2532,29 @@ function MapView({
   const googleMapRef = useRef<any>(null);
   const mapInfoWindowRef = useRef<any>(null);
   const mapMarkersRef = useRef<any[]>([]);
+  const mapDidFitInitialBoundsRef = useRef(false);
   const [focusedEventId, setFocusedEventId] = useState("");
   const [previewEventId, setPreviewEventId] = useState("");
   const [mapError, setMapError] = useState(false);
-  const [geocodedLocations, setGeocodedLocations] = useState<Record<string, { latitude: number; longitude: number }>>({});
   const googleMapsApiKey = String((import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
   const isFileProtocol = window.location.protocol === "file:";
   const eventPins = useMemo<EventMapPin[]>(() => {
     return items
       .map((item): EventMapPin | undefined => {
-        const locationName = item.locationName?.trim();
-        if (!locationName) return undefined;
+        if (!hasCoordinates(item)) return undefined;
+        const locationName = item.locationName?.trim() || "座標指定";
         const countryIds = getRecordCountryIds(item);
         const countryId = countryIds[0];
-        const countryNames = countryIds.map((id) => getCountryName(countries, id));
-        if (hasCoordinates(item)) {
-          return {
-            item,
-            locationName,
-            latitude: item.locationLat as number,
-            longitude: item.locationLng as number,
-            countryId,
-          };
-        }
-        const typedCoordinates = parseCoordinatePair(locationName);
-        if (typedCoordinates) {
-          return {
-            item,
-            locationName,
-            latitude: typedCoordinates.latitude,
-            longitude: typedCoordinates.longitude,
-            countryId,
-          };
-        }
-
-        const geocoded = locationName ? geocodedLocations[item.id] : undefined;
-        if (locationName && geocoded) {
-          return {
-            item,
-            locationName,
-            latitude: geocoded.latitude,
-            longitude: geocoded.longitude,
-            countryId,
-          };
-        }
-        const dictionaryLocation = getDictionaryLocation(locationName, countryNames);
-        if (dictionaryLocation) {
-          return {
-            item,
-            locationName,
-            latitude: dictionaryLocation.latitude,
-            longitude: dictionaryLocation.longitude,
-            countryId,
-          };
-        }
-        const representativeLocation = getRepresentativeLocation(locationName, regions, countryNames, countryIds);
-        if (representativeLocation) {
-          return {
-            item,
-            locationName,
-            latitude: representativeLocation.latitude,
-            longitude: representativeLocation.longitude,
-            countryId,
-          };
-        }
-        return undefined;
+        return {
+          item,
+          locationName,
+          latitude: item.locationLat as number,
+          longitude: item.locationLng as number,
+          countryId,
+        };
       })
       .filter((pin): pin is EventMapPin => Boolean(pin));
-  }, [countries, geocodedLocations, items, regions]);
+  }, [items]);
   const focusedEventPin = eventPins.find((pin) => pin.item.id === focusedEventId);
   const previewEventPin = eventPins.find((pin) => pin.item.id === previewEventId);
 
@@ -2583,23 +2570,9 @@ function MapView({
           locationLng: typedCoordinates.longitude,
           regionIds: [],
         });
-        return;
       }
-      const countryIds = getRecordCountryIds(item);
-      const countryNames = countryIds.map((id) => getCountryName(countries, id));
-      const dictionaryLocation = getDictionaryLocation(locationName, countryNames);
-      if (!dictionaryLocation) return;
-      const savedLocation = hasCoordinates(item)
-        ? { latitude: item.locationLat as number, longitude: item.locationLng as number }
-        : undefined;
-      if (isSameMapPoint(savedLocation, dictionaryLocation)) return;
-      onUpdateEvent(item.id, {
-        locationLat: dictionaryLocation.latitude,
-        locationLng: dictionaryLocation.longitude,
-        regionIds: [],
-      });
     });
-  }, [countries, items, onUpdateEvent]);
+  }, [items, onUpdateEvent]);
 
   useEffect(() => {
     if (!focusedEventPin || !googleMapRef.current) return;
@@ -2608,84 +2581,7 @@ function MapView({
   }, [focusedEventPin]);
 
   useEffect(() => {
-    if (!googleMapsApiKey || isFileProtocol) return;
-    const pendingItems = items.filter((item) => {
-      const locationName = item.locationName?.trim();
-      return locationName && !hasCoordinates(item) && !geocodedLocations[item.id];
-    });
-    if (pendingItems.length === 0) return;
-
-    let cancelled = false;
-    setMapError(false);
-    window.gm_authFailure = () => setMapError(true);
-
-    const timeout = window.setTimeout(() => {
-      loadGoogleMaps(googleMapsApiKey)
-        .then(() => {
-          if (cancelled || !window.google?.maps) return;
-          const geocoder = new window.google.maps.Geocoder();
-          pendingItems.forEach((item) => {
-            const address = item.locationName?.trim();
-            if (!address) return;
-            const countryIds = getRecordCountryIds(item);
-            const countryNames = countryIds.map((id) => getCountryName(countries, id));
-            const dictionaryLocation = getDictionaryLocation(address, countryNames);
-            if (dictionaryLocation) {
-              onUpdateEvent(item.id, {
-                locationLat: dictionaryLocation.latitude,
-                locationLng: dictionaryLocation.longitude,
-                regionIds: [],
-              });
-              setGeocodedLocations((current) => ({ ...current, [item.id]: dictionaryLocation }));
-              return;
-            }
-            const representativeLocation = getRepresentativeLocation(address, regions, countryNames, countryIds);
-            const queries = buildLocationQueries(address, countryNames, countryIds);
-            let queryIndex = 0;
-            const saveResolvedLocation = (nextLocation: MapPoint) => {
-              setGeocodedLocations((current) => ({ ...current, [item.id]: nextLocation }));
-              onUpdateEvent(item.id, {
-                locationLat: nextLocation.latitude,
-                locationLng: nextLocation.longitude,
-                regionIds: [],
-              });
-            };
-            const tryNextQuery = () => {
-              const query = queries[queryIndex];
-              if (!query) {
-                if (representativeLocation) saveResolvedLocation(representativeLocation);
-                return;
-              }
-              queryIndex += 1;
-              geocoder.geocode({ address: query, region: "JP" }, (results: any[], status: string) => {
-                if (cancelled) return;
-                if (status !== "OK" || !results?.[0]?.geometry?.location) {
-                  tryNextQuery();
-                  return;
-                }
-                const location = results[0].geometry.location;
-                saveResolvedLocation({
-                  latitude: location.lat(),
-                  longitude: location.lng(),
-                });
-              });
-            };
-            tryNextQuery();
-          });
-        })
-        .catch(() => {
-          if (!cancelled) setMapError(true);
-        });
-    }, 600);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, [countries, geocodedLocations, googleMapsApiKey, isFileProtocol, items, onUpdateEvent, regions]);
-
-  useEffect(() => {
-    if (!googleMapsApiKey || isFileProtocol || !mapElementRef.current || eventPins.length === 0) return;
+    if (!googleMapsApiKey || isFileProtocol || !mapElementRef.current) return;
     let cancelled = false;
     setMapError(false);
     window.gm_authFailure = () => setMapError(true);
@@ -2696,7 +2592,7 @@ function MapView({
       const map =
         googleMapRef.current ??
         new maps.Map(mapElementRef.current, {
-          center: { lat: eventPins[0].latitude, lng: eventPins[0].longitude },
+          center: eventPins[0] ? { lat: eventPins[0].latitude, lng: eventPins[0].longitude } : { lat: 35.6812, lng: 139.7671 },
           zoom: 5,
           mapTypeControl: false,
           streetViewControl: false,
@@ -2709,6 +2605,7 @@ function MapView({
 
       mapMarkersRef.current.forEach((overlay) => overlay.setMap(null));
       mapMarkersRef.current = [];
+      if (eventPins.length === 0) return;
 
       eventPins.forEach((pin) => {
         const position = { lat: pin.latitude, lng: pin.longitude };
@@ -2756,11 +2653,14 @@ function MapView({
         bounds.extend(position);
       });
 
-      if (eventPins.length === 1) {
-        map.setCenter({ lat: eventPins[0].latitude, lng: eventPins[0].longitude });
-        map.setZoom(7);
-      } else {
-        map.fitBounds(bounds, 64);
+      if (!mapDidFitInitialBoundsRef.current) {
+        if (eventPins.length === 1) {
+          map.setCenter({ lat: eventPins[0].latitude, lng: eventPins[0].longitude });
+          map.setZoom(7);
+        } else {
+          map.fitBounds(bounds, 64);
+        }
+        mapDidFitInitialBoundsRef.current = true;
       }
     }).catch(() => {
       if (!cancelled) setMapError(true);
@@ -3956,9 +3856,6 @@ function DetailPanel({
                   onChange={(input) =>
                     onUpdateEvent(event.id, {
                       locationName: input.target.value || undefined,
-                      locationLat: undefined,
-                      locationLng: undefined,
-                      regionIds: [],
                     })
                   }
                   placeholder="例: サラエボ"
