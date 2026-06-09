@@ -1748,7 +1748,7 @@ function App() {
       <section className="workspace">
         <aside className={`control-panel ${mobileFiltersOpen ? "mobile-open" : ""}`} aria-label="検索条件">
           <div className="panel-title">
-            <span className="brand-mark">歴史DB</span>
+            <span className="brand-mark">歴史データベース</span>
           </div>
 
           <div className="view-tabs" role="tablist" aria-label="表示ビュー">
