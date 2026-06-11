@@ -84,7 +84,7 @@ type EventPlacement = {
   stack: number;
 };
 
-const baseCategories: Category[] = ["戦争", "イベント", "発明", "文化"];
+const baseCategories: Category[] = ["戦争", "イベント", "発明・発見", "文化"];
 const baseTermCategories = ["用語", "概念", "地域", "史料"];
 const timelineCategoryOrder = baseCategories;
 const eventCategoryColors: Record<string, { background: string; mark: string; text: string }> = {
@@ -92,6 +92,7 @@ const eventCategoryColors: Record<string, { background: string; mark: string; te
   イベント: { background: "#f7c948", mark: "#f7c948", text: "#241a00" },
   文化: { background: "#d1c4e9", mark: "#7c3aed", text: "#241a00" },
   発明: { background: "#e3f2fd", mark: "#1976d2", text: "#241a00" },
+  "発明・発見": { background: "#e3f2fd", mark: "#1976d2", text: "#241a00" },
 };
 const viewModes: Array<{ id: ViewMode; label: string; icon: typeof Rows3 }> = [
   { id: "timeline", label: "年表", icon: Rows3 },
@@ -520,12 +521,13 @@ function sortEventCategories(categories: string[]) {
 }
 
 function normalizeEventCategory(category: string | undefined): Category {
-  if (category === "戦争" || category === "文化" || category === "発明" || category === "イベント") return category;
-  return "イベント";
+  const normalized = category?.trim();
+  if (normalized === "発明") return "発明・発見";
+  return normalized || "イベント";
 }
 
 function getEventCategoryColor(category: string) {
-  return eventCategoryColors[normalizeEventCategory(category)] ?? eventCategoryColors["イベント"];
+  return eventCategoryColors[category] ?? eventCategoryColors["イベント"];
 }
 
 function escapeHtml(value: string) {
@@ -1030,8 +1032,8 @@ function App() {
 
   const timelineItems = useMemo(() => buildTimelineItems(people, events, personEvents), [people, events]);
   const categories = useMemo(
-    () => baseCategories,
-    [],
+    () => uniqueValues([...baseCategories, ...customCategories, ...events.map((event) => event.category)]),
+    [customCategories, events],
   );
   const termCategories = useMemo(
     () => uniqueValues([...baseTermCategories, ...termCards.map((term) => term.category)]),
@@ -2388,11 +2390,16 @@ function TimelineView({
               >
                 <span>{person.name}</span>
                 <span className="hover-summary person-hover">
-                  {(person.imageUrls ?? []).length > 0 && <img alt={person.name} src={person.imageUrls![0]} />}
-                  <strong>{person.name}</strong>
-                  <b>{toPersonLifeLabel(person)}</b>
-                  <br />
-                  {person.summary}
+                  {(person.imageUrls ?? []).length > 0 && (
+                    <span className="person-hover-image">
+                      <img alt={person.name} src={person.imageUrls![0]} />
+                    </span>
+                  )}
+                  <span className="person-hover-copy">
+                    <strong>{person.name}</strong>
+                    <b>{toPersonLifeLabel(person)}</b>
+                    <span>{person.summary}</span>
+                  </span>
                 </span>
               </button>
             );
@@ -2810,6 +2817,8 @@ function FilterSearchSelect({
   onChange,
   onDelete,
   onCreate,
+  maxValues,
+  emptyLabel = "すべて",
 }: {
   label: string;
   values: string[];
@@ -2818,6 +2827,8 @@ function FilterSearchSelect({
   onChange: (values: string[]) => void;
   onDelete?: (value: string) => void;
   onCreate?: (value: string) => void;
+  maxValues?: number;
+  emptyLabel?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -2825,7 +2836,7 @@ function FilterSearchSelect({
   const selectedLabels = values
     .map((value) => options.find((option) => option.value === value)?.label ?? value)
     .filter(Boolean);
-  const selectedLabel = selectedLabels.length === 0 ? "すべて" : selectedLabels.join("、");
+  const selectedLabel = selectedLabels.length === 0 ? emptyLabel : selectedLabels.join("、");
   const filteredOptions = options.filter((option) => matchesSearch(option.label, query));
   const trimmedQuery = query.trim();
   const canCreate =
@@ -2845,9 +2856,14 @@ function FilterSearchSelect({
   }, [open]);
 
   function toggleValue(nextValue: string) {
-    const nextValues = values.includes(nextValue)
-      ? values.filter((value) => value !== nextValue)
-      : [...values, nextValue];
+    const nextValues =
+      maxValues === 1
+        ? values.includes(nextValue)
+          ? []
+          : [nextValue]
+        : values.includes(nextValue)
+          ? values.filter((value) => value !== nextValue)
+          : [...values, nextValue];
     onChange(nextValues);
   }
 
@@ -3772,7 +3788,7 @@ function DetailPanel({
             {eventPreviewTab === "summary" && (
               <section className="person-detail-section">
                 <h3>概要</h3>
-                <p>{renderLinkedText(event.detail, event.terms)}</p>
+                <p>{renderLinkedText(event.summary, event.terms)}</p>
                 <h3>本文</h3>
                 <RichContentView blocks={event.contentBlocks} />
               </section>
@@ -3808,6 +3824,7 @@ function DetailPanel({
 
           {editMode && (
             <div className="detail-form">
+              <ImageUploadEditor label="プレビュー画像" values={event.imageUrls ?? []} onChange={(values) => onUpdateEvent(event.id, { imageUrls: values })} />
               <label>
                 出来事名
                 <input value={event.title} onChange={(input) => onUpdateEvent(event.id, { title: input.target.value })} />
@@ -3822,32 +3839,38 @@ function DetailPanel({
                 <HistoricalDateInput label="開始年月日" value={event.startDate} onChange={(value) => onUpdateEvent(event.id, { startDate: value ?? "" })} />
                 <HistoricalDateInput label="終了年月日" value={event.endDate} onChange={(value) => onUpdateEvent(event.id, { endDate: value })} allowEmpty />
               </div>
-              <label>
-                カテゴリ
-                <select
-                  value={event.category}
-                  onChange={(input) => onUpdateEvent(event.id, { category: normalizeEventCategory(input.target.value) })}
-                >
-                  {categories.map((category) => (
-                    <option key={category} value={category}>{category}</option>
-                  ))}
-                </select>
-              </label>
-              <ChipEditor
+              <FilterSearchSelect
+                label="カテゴリ"
+                values={event.category ? [event.category] : []}
+                onChange={(values) => onUpdateEvent(event.id, { category: normalizeEventCategory(values[0]) })}
+                onCreate={(value) => onUpdateEvent(event.id, { category: normalizeEventCategory(value) })}
+                options={categories.map((category) => ({ value: category, label: category }))}
+                placeholder="カテゴリを検索"
+                maxValues={1}
+                emptyLabel="未選択"
+              />
+              <FilterSearchSelect
                 label="小カテゴリ"
                 values={event.genres ?? []}
                 onChange={(values) => onUpdateEvent(event.id, { genres: values })}
+                onCreate={(value) => onUpdateEvent(event.id, { genres: uniqueValues([...(event.genres ?? []), value.trim()]) })}
                 options={genres.map((genre) => ({ value: genre, label: genre }))}
-                placeholder="例: 暗殺"
+                placeholder="小カテゴリを検索"
+                emptyLabel="未選択"
               />
-              <ChipEditor
+              <FilterSearchSelect
                 label="国"
                 values={getRecordCountryIds(event)}
                 onChange={(values) => onUpdateEvent(event.id, { countryIds: values })}
+                onCreate={(value) => {
+                  const countryId = onResolveCountry(value);
+                  if (countryId) {
+                    onUpdateEvent(event.id, { countryIds: uniqueValues([...getRecordCountryIds(event), countryId]) });
+                  }
+                }}
                 options={countries.map((country) => ({ value: country.id, label: country.name }))}
-                placeholder="国を選択"
-                renderValue={(value) => getCountryName(countries, value)}
-                createValue={onResolveCountry}
+                placeholder="国を検索"
+                emptyLabel="未選択"
               />
               <label>
                 発生地点
@@ -3888,15 +3911,11 @@ function DetailPanel({
                 />
               </label>
               <label>
-                簡単な概要
-                <textarea value={event.summary} onChange={(input) => onUpdateEvent(event.id, { summary: input.target.value })} />
-              </label>
-              <label>
-                詳細
+                概要
                 <textarea
                   className="large-text"
-                  value={event.detail}
-                  onChange={(input) => onUpdateEvent(event.id, { detail: input.target.value })}
+                  value={event.summary}
+                  onChange={(input) => onUpdateEvent(event.id, { summary: input.target.value, detail: input.target.value })}
                 />
               </label>
               <label>
@@ -3904,7 +3923,6 @@ function DetailPanel({
                 <RichContentEditor editorKey={`event-${event.id}-content`} blocks={event.contentBlocks} onChange={(blocks) => onUpdateEvent(event.id, { contentBlocks: blocks })} />
               </label>
               <ChipEditor label="紐付ける単語" values={event.terms} onChange={(values) => onUpdateEvent(event.id, { terms: values })} placeholder="例: 第一次世界大戦" />
-              <ImageUploadEditor label="プレビュー画像" values={event.imageUrls ?? []} onChange={(values) => onUpdateEvent(event.id, { imageUrls: values })} />
               <LearningFilesEditor values={event.learningFiles ?? []} onChange={(values) => onUpdateEvent(event.id, { learningFiles: values })} />
               <ChipEditor label="参考資料" values={event.references ?? []} onChange={(values) => onUpdateEvent(event.id, { references: values })} placeholder="資料名・URLを追加" />
               <button className="delete-card-button" type="button" onClick={() => onDeleteEvent(event.id)}>
@@ -4051,21 +4069,31 @@ function DetailPanel({
                     }
                   />
                 </div>
-                <ChipEditor
+                <FilterSearchSelect
                   label="カテゴリ"
                   values={getPersonCategories(person)}
                   onChange={(values) => onUpdatePerson(person.id, { affiliations: values, genres: values })}
+                  onCreate={(value) => {
+                    const nextValues = uniqueValues([...getPersonCategories(person), value.trim()]);
+                    onUpdatePerson(person.id, { affiliations: nextValues, genres: nextValues });
+                  }}
                   options={personCategories.map((category) => ({ value: category, label: category }))}
-                  placeholder="例: 政治家"
+                  placeholder="カテゴリを検索"
+                  emptyLabel="未選択"
                 />
-                <ChipEditor
+                <FilterSearchSelect
                   label="国"
                   values={getRecordCountryIds(person)}
                   onChange={(values) => onUpdatePerson(person.id, { countryIds: values, regionIds: [] })}
+                  onCreate={(value) => {
+                    const countryId = onResolveCountry(value);
+                    if (countryId) {
+                      onUpdatePerson(person.id, { countryIds: uniqueValues([...getRecordCountryIds(person), countryId]), regionIds: [] });
+                    }
+                  }}
                   options={countries.map((country) => ({ value: country.id, label: country.name }))}
-                  placeholder="国を選択"
-                  renderValue={(value) => getCountryName(countries, value)}
-                  createValue={onResolveCountry}
+                  placeholder="国を検索"
+                  emptyLabel="未選択"
                 />
               </details>
               <details className="edit-section" open>
@@ -4146,7 +4174,7 @@ function DetailPanel({
             {termPreviewTab === "summary" && (
               <section className="person-detail-section">
                 <h3>概要</h3>
-                <p>{renderLinkedText(term.detail, term.relatedTerms)}</p>
+                <p>{renderLinkedText(term.summary, term.relatedTerms)}</p>
                 <h3>本文</h3>
                 <RichContentView blocks={term.contentBlocks} />
               </section>
@@ -4182,42 +4210,37 @@ function DetailPanel({
 
           {editMode && (
             <div className="detail-form">
+              <ImageUploadEditor label="プレビュー画像" values={term.imageUrls ?? []} onChange={(values) => onUpdateTerm(term.id, { imageUrls: values })} />
               <label>
                 単語
                 <input value={term.term} onChange={(input) => onUpdateTerm(term.id, { term: input.target.value })} />
               </label>
-              <label>
-                種別
-                <input
-                  list="term-category-options"
-                  value={term.category}
-                  onChange={(input) => onUpdateTerm(term.id, { category: input.target.value as TermCard["category"] })}
-                  placeholder="例: 思想"
-                />
-                <datalist id="term-category-options">
-                  {termCategories.map((category) => (
-                    <option key={category} value={category} />
-                  ))}
-                </datalist>
-              </label>
-              <ChipEditor
+              <FilterSearchSelect
+                label="種別"
+                values={term.category ? [term.category] : []}
+                onChange={(values) => onUpdateTerm(term.id, { category: (values[0] ?? "") as TermCard["category"] })}
+                onCreate={(value) => onUpdateTerm(term.id, { category: value.trim() as TermCard["category"] })}
+                options={termCategories.map((category) => ({ value: category, label: category }))}
+                placeholder="種別を検索"
+                maxValues={1}
+                emptyLabel="未選択"
+              />
+              <FilterSearchSelect
                 label="ジャンル"
                 values={term.genres ?? []}
                 onChange={(values) => onUpdateTerm(term.id, { genres: values })}
+                onCreate={(value) => onUpdateTerm(term.id, { genres: uniqueValues([...(term.genres ?? []), value.trim()]) })}
                 options={genres.map((genre) => ({ value: genre, label: genre }))}
-                placeholder="例: 思想史"
+                placeholder="ジャンルを検索"
+                emptyLabel="未選択"
               />
               <ChipEditor label="別名" values={term.aliases} onChange={(values) => onUpdateTerm(term.id, { aliases: values })} placeholder="別名を追加" />
               <label>
                 概要
-                <textarea value={term.summary} onChange={(input) => onUpdateTerm(term.id, { summary: input.target.value })} />
-              </label>
-              <label>
-                詳細
                 <textarea
                   className="large-text"
-                  value={term.detail}
-                  onChange={(input) => onUpdateTerm(term.id, { detail: input.target.value })}
+                  value={term.summary}
+                  onChange={(input) => onUpdateTerm(term.id, { summary: input.target.value, detail: input.target.value })}
                 />
               </label>
               <label>
@@ -4225,7 +4248,6 @@ function DetailPanel({
                 <RichContentEditor editorKey={`term-${term.id}-content`} blocks={term.contentBlocks} onChange={(blocks) => onUpdateTerm(term.id, { contentBlocks: blocks })} />
               </label>
               <ChipEditor label="紐付ける単語" values={term.relatedTerms} onChange={(values) => onUpdateTerm(term.id, { relatedTerms: values })} placeholder="例: ポリス" />
-              <ImageUploadEditor label="プレビュー画像" values={term.imageUrls ?? []} onChange={(values) => onUpdateTerm(term.id, { imageUrls: values })} />
               <LearningFilesEditor values={term.learningFiles ?? []} onChange={(values) => onUpdateTerm(term.id, { learningFiles: values })} />
               <ChipEditor label="参考資料" values={term.references ?? []} onChange={(values) => onUpdateTerm(term.id, { references: values })} placeholder="資料名・URLを追加" />
               <button className="delete-card-button" type="button" onClick={() => onDeleteTerm(term.id)}>

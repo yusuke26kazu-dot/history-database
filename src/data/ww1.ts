@@ -478,7 +478,7 @@ export const events: Event[] = [
     id: "printing-press",
     title: "活版印刷",
     startDate: "1450",
-    category: "発明",
+    category: "発明・発見",
     relatedCountries: ["ヨーロッパ"],
     countryIds: [],
     regionIds: [],
