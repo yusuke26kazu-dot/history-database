@@ -2548,7 +2548,8 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
-.detail-hero-copy .hero-date {
+.detail-hero-copy .hero-date,
+.detail-hero-copy .hero-countries {
   display: inline-flex;
   align-items: center;
   gap: 14px;
@@ -2558,7 +2559,15 @@ textarea:focus {
   letter-spacing: 0.04em;
 }
 
-.detail-hero-copy .hero-date svg {
+.detail-hero-copy .hero-countries {
+  margin-top: 8px;
+  max-width: 100%;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.detail-hero-copy .hero-date svg,
+.detail-hero-copy .hero-countries svg {
   flex: 0 0 auto;
   filter: drop-shadow(0 2px 10px rgb(0 0 0 / 45%));
 }
@@ -3807,7 +3816,8 @@ textarea:focus {
   }
 
   .detail-hero-copy .hero-kicker,
-  .detail-hero-copy .hero-date {
+  .detail-hero-copy .hero-date,
+  .detail-hero-copy .hero-countries {
     font-size: 0.72rem;
   }
 

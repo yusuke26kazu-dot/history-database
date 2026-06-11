@@ -3751,6 +3751,12 @@ function DetailPanel({
                   {toLabelDate(event.startDate)}
                   {event.endDate ? ` - ${toLabelDate(event.endDate)}` : ""}
                 </small>
+                {getRecordCountryIds(event).length > 0 && (
+                  <small className="hero-countries">
+                    <MapPin size={17} />
+                    {getRecordCountryIds(event).map((id) => getCountryName(countries, id)).join("、")}
+                  </small>
+                )}
               </div>
             </div>
             {event.locationName?.trim() && (
@@ -3948,6 +3954,12 @@ function DetailPanel({
                   <CalendarDays size={18} />
                   {toPersonLifeLabel(person)}
                 </small>
+                {getRecordCountryIds(person).length > 0 && (
+                  <small className="hero-countries">
+                    <MapPin size={17} />
+                    {getRecordCountryIds(person).map((id) => getCountryName(countries, id)).join("、")}
+                  </small>
+                )}
               </div>
             </div>
             <HashtagList values={getPersonCategories(person)} />
