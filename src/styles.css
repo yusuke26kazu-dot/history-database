@@ -2617,6 +2617,10 @@ textarea:focus {
   line-height: 1.85;
 }
 
+.rich-content p {
+  white-space: pre-wrap;
+}
+
 .rich-content blockquote {
   border-left: 4px solid #31b89f;
   background: #f1faf7;
@@ -2838,6 +2842,25 @@ textarea:focus {
   padding: 5px 8px;
   font-size: 0.76rem;
   font-weight: 850;
+}
+
+.plain-content-editor {
+  min-height: 260px;
+  resize: vertical;
+  border: 1px solid #d8e3e8;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 0.94rem;
+  line-height: 1.75;
+}
+
+.plain-content-editor:focus {
+  border-color: rgb(47 100 128 / 58%);
+  box-shadow: 0 0 0 3px rgb(47 100 128 / 10%);
+  outline: 0;
 }
 
 .free-rich-color input {

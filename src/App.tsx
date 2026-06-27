@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -90,10 +90,11 @@ type EventPlacement = {
   stack: number;
 };
 
-const baseCategories: Category[] = ["戦争", "イベント", "発明・発見", "文化"];
+const baseCategories: Category[] = ["国", "戦争", "イベント", "発明・発見", "文化"];
 const baseTermCategories = ["用語", "概念", "地域", "史料"];
 const timelineCategoryOrder = baseCategories;
 const eventCategoryColors: Record<string, { background: string; mark: string; text: string }> = {
+  国: { background: "#fff4cf", mark: "#e8c765", text: "#241a00" },
   戦争: { background: "#ffcdd2", mark: "#e53935", text: "#241a00" },
   イベント: { background: "#f7c948", mark: "#f7c948", text: "#241a00" },
   文化: { background: "#d1c4e9", mark: "#7c3aed", text: "#241a00" },
@@ -1025,6 +1026,36 @@ function blocksToFreeHtml(blocks?: ContentBlock[]) {
 function freeHtmlToBlocks(html: string): ContentBlock[] {
   const sanitized = sanitizeRichHtml(html);
   return sanitized.trim() ? [{ id: makeId("block"), type: "html", text: sanitized }] : [];
+}
+
+function htmlToPlainText(html: string) {
+  const template = document.createElement("template");
+  template.innerHTML = sanitizeRichHtml(html);
+  template.content.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+  template.content.querySelectorAll("p, h2, h3, blockquote, figure, figcaption, div").forEach((element) => {
+    element.appendChild(document.createTextNode("\n"));
+  });
+  return (template.content.textContent ?? "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function blocksToPlainText(blocks?: ContentBlock[]) {
+  if (!blocks?.length) return "";
+  const htmlBlock = blocks.find((block) => block.type === "html");
+  if (htmlBlock) return htmlToPlainText(htmlBlock.text);
+  return blocks
+    .map((block) => {
+      if (block.type === "image" || block.type === "video") return block.caption || "";
+      return block.text;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function plainTextToBlocks(text: string): ContentBlock[] {
+  const nextText = text.trim();
+  return nextText ? [{ id: makeId("block"), type: "paragraph", text: nextText }] : [];
 }
 
 function toEmbedUrl(value: string) {
@@ -3588,130 +3619,25 @@ function RichContentEditor({
   editorKey: string;
   onChange: (blocks: ContentBlock[]) => void;
 }) {
-  const editorRef = useRef<HTMLDivElement | null>(null);
-  const latestHtmlRef = useRef(blocksToFreeHtml(blocks));
-  const editorKeyRef = useRef(editorKey);
+  const [text, setText] = useState(() => blocksToPlainText(blocks));
 
-  useLayoutEffect(() => {
-    if (editorKeyRef.current === editorKey) return;
-    const nextHtml = blocksToFreeHtml(blocks);
-    editorKeyRef.current = editorKey;
-    latestHtmlRef.current = nextHtml;
-    if (editorRef.current) editorRef.current.innerHTML = sanitizeRichHtml(nextHtml);
-  }, [blocks, editorKey]);
-
-  function saveEditorHtml(nextHtml = editorRef.current?.innerHTML ?? "") {
-    latestHtmlRef.current = nextHtml;
-    onChange(freeHtmlToBlocks(nextHtml));
-  }
-
-  function focusEditor() {
-    editorRef.current?.focus();
-  }
-
-  function runCommand(command: string, value?: string) {
-    focusEditor();
-    document.execCommand(command, false, value);
-    saveEditorHtml();
-  }
-
-  function setBlock(tagName: "P" | "H2" | "H3" | "BLOCKQUOTE") {
-    runCommand("formatBlock", tagName);
-  }
-
-  function insertHtml(nextHtml: string) {
-    focusEditor();
-    document.execCommand("insertHTML", false, nextHtml);
-    saveEditorHtml();
-  }
-
-  function formatPlainTextForPaste(text: string) {
-    return text
-      .split(/\n{2,}/)
-      .map((paragraph) => paragraph.trim())
-      .filter(Boolean)
-      .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
-      .join("");
-  }
-
-  function insertImage() {
-    document.getElementById("rich-image-upload")?.click();
-  }
-
-  function insertVideo() {
-    const url = window.prompt("YouTubeなどの動画URLを入力してください");
-    if (!url?.trim() || !isSafeMediaUrl(url.trim())) return;
-    insertHtml(`<figure><iframe src="${escapeHtml(toEmbedUrl(url.trim()))}" title="動画" allowfullscreen></iframe><figcaption></figcaption></figure><p><br></p>`);
-  }
-
-  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
-    const imageFile = Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/"));
-    event.preventDefault();
-    if (imageFile) {
-      uploadFileAsset(imageFile).then((result) => {
-        if (!result) return;
-        insertHtml(`<figure><img src="${result}" alt="貼り付け画像"><figcaption></figcaption></figure><p><br></p>`);
-      });
-      return;
-    }
-    const html = event.clipboardData.getData("text/html");
-    const plainText = event.clipboardData.getData("text/plain");
-    const nextHtml = html ? sanitizeRichHtml(html) : formatPlainTextForPaste(plainText);
-    if (nextHtml) insertHtml(nextHtml);
-  }
-
-  function handleImageUpload(files: FileList | null) {
-    const file = files?.[0];
-    if (!file?.type.startsWith("image/")) return;
-    uploadFileAsset(file).then((result) => {
-      if (!result) return;
-      insertHtml(`<figure><img src="${result}" alt="${escapeHtml(file.name)}"><figcaption></figcaption></figure><p><br></p>`);
-    });
-  }
+  useEffect(() => {
+    setText(blocksToPlainText(blocks));
+  }, [editorKey]);
 
   return (
-    <div className="free-rich-editor">
-      <div className="free-rich-toolbar" aria-label="本文編集ツール">
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("P")}>本文</button>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("H2")}>見出し</button>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("H3")}>小見出し</button>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setBlock("BLOCKQUOTE")}>引用</button>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")}>太字</button>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("italic")}>斜体</button>
-        <label className="free-rich-color">
-          文字色
-          <input type="color" defaultValue="#172026" onChange={(event) => runCommand("foreColor", event.target.value)} />
-        </label>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertImage}>画像</button>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertVideo}>動画</button>
-        <input
-          id="rich-image-upload"
-          hidden
-          type="file"
-          accept="image/*"
-          onChange={(event) => {
-            handleImageUpload(event.target.files);
-            event.target.value = "";
-          }}
-        />
-      </div>
-      <div
-        className="free-rich-surface"
-        contentEditable
-        onBlur={() => saveEditorHtml()}
-        onInput={() => saveEditorHtml()}
-        onPaste={handlePaste}
-        ref={(element) => {
-          editorRef.current = element;
-          if (element && !element.innerHTML) {
-            element.innerHTML = sanitizeRichHtml(latestHtmlRef.current);
-          }
-        }}
-        role="textbox"
-        suppressContentEditableWarning
-        aria-label="詳細ページ本文"
+    <textarea
+      className="plain-content-editor"
+      key={editorKey}
+      value={text}
+      onChange={(event) => {
+        const nextText = event.target.value;
+        setText(nextText);
+        onChange(plainTextToBlocks(nextText));
+      }}
+      placeholder="本文を入力してください。既存カード名が含まれていれば、プレビューで自動的にリンクされます。"
+      aria-label="詳細ページ本文"
       />
-    </div>
   );
 }
 
