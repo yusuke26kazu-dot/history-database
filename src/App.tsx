@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -874,6 +874,17 @@ function sanitizeRichHtml(value: string) {
   if (!value.trim()) return "";
   const template = document.createElement("template");
   template.innerHTML = value;
+  Array.from(template.content.querySelectorAll("ul, ol")).forEach((list) => {
+    const fragment = document.createDocumentFragment();
+    Array.from(list.children).forEach((item) => {
+      if (item.tagName !== "LI") return;
+      if (!item.textContent?.trim() && !item.querySelector("img, iframe")) return;
+      const paragraph = document.createElement("p");
+      paragraph.innerHTML = item.innerHTML;
+      fragment.appendChild(paragraph);
+    });
+    list.replaceWith(fragment);
+  });
   const allowedTags = new Set([
     "B",
     "BLOCKQUOTE",
@@ -887,14 +898,11 @@ function sanitizeRichHtml(value: string) {
     "I",
     "IFRAME",
     "IMG",
-    "LI",
-    "OL",
     "P",
     "FONT",
     "SPAN",
     "STRONG",
     "U",
-    "UL",
   ]);
   const allowedAttributes = new Set(["allowfullscreen", "alt", "color", "src", "style", "title"]);
   Array.from(template.content.querySelectorAll("*")).forEach((element) => {
@@ -921,16 +929,6 @@ function sanitizeRichHtml(value: string) {
       element.remove();
     }
     if (element.tagName === "IFRAME" && !isSafeMediaUrl(element.getAttribute("src") ?? "", "iframe")) {
-      element.remove();
-    }
-  });
-  Array.from(template.content.querySelectorAll("li")).forEach((element) => {
-    if (!element.textContent?.trim() && !element.querySelector("img, iframe")) {
-      element.remove();
-    }
-  });
-  Array.from(template.content.querySelectorAll("ul, ol")).forEach((element) => {
-    if (!element.textContent?.trim() && !element.querySelector("img, iframe")) {
       element.remove();
     }
   });
@@ -977,10 +975,6 @@ function renderLinkedHtmlNode(node: ChildNode, key: string, renderText: (text: s
       return <iframe key={key} title={element.getAttribute("title") ?? "埋め込み動画"} src={element.getAttribute("src") ?? ""} allowFullScreen />;
     case "IMG":
       return <img key={key} alt={element.getAttribute("alt") ?? "本文画像"} src={element.getAttribute("src") ?? ""} />;
-    case "LI":
-      return <li key={key} style={style}>{children}</li>;
-    case "OL":
-      return <ol key={key} style={style}>{children}</ol>;
     case "P":
       return <p key={key} style={style}>{children}</p>;
     case "SPAN":
@@ -988,8 +982,6 @@ function renderLinkedHtmlNode(node: ChildNode, key: string, renderText: (text: s
       return <span key={key} style={style}>{children}</span>;
     case "U":
       return <u key={key} style={style}>{children}</u>;
-    case "UL":
-      return <ul key={key} style={style}>{children}</ul>;
     default:
       return <span key={key}>{children}</span>;
   }
@@ -3633,37 +3625,6 @@ function RichContentEditor({
     saveEditorHtml();
   }
 
-  function placeCaretInside(element: HTMLElement) {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  }
-
-  function insertParagraphAfterList(list: HTMLElement, item: HTMLElement) {
-    const paragraph = document.createElement("p");
-    paragraph.appendChild(document.createElement("br"));
-    if (list.children.length <= 1) {
-      list.replaceWith(paragraph);
-    } else {
-      item.remove();
-      list.after(paragraph);
-    }
-    placeCaretInside(paragraph);
-    saveEditorHtml();
-  }
-
-  function getActiveListItem() {
-    const selection = window.getSelection();
-    const node = selection?.anchorNode;
-    const element = node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement;
-    const listItem = element?.closest("li");
-    if (!listItem || !editorRef.current?.contains(listItem)) return null;
-    return listItem as HTMLElement;
-  }
-
   function formatPlainTextForPaste(text: string) {
     return text
       .split(/\n{2,}/)
@@ -3671,16 +3632,6 @@ function RichContentEditor({
       .filter(Boolean)
       .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
       .join("");
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Backspace") return;
-    const listItem = getActiveListItem();
-    if (!listItem || listItem.textContent?.trim()) return;
-    const list = listItem.parentElement;
-    if (!list || !["UL", "OL"].includes(list.tagName)) return;
-    event.preventDefault();
-    insertParagraphAfterList(list, listItem);
   }
 
   function insertImage() {
@@ -3731,7 +3682,6 @@ function RichContentEditor({
           文字色
           <input type="color" defaultValue="#172026" onChange={(event) => runCommand("foreColor", event.target.value)} />
         </label>
-        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertUnorderedList")}>箇条書き</button>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertImage}>画像</button>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertVideo}>動画</button>
         <input
@@ -3750,7 +3700,6 @@ function RichContentEditor({
         contentEditable
         onBlur={() => saveEditorHtml()}
         onInput={() => saveEditorHtml()}
-        onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         ref={(element) => {
           editorRef.current = element;

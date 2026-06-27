@@ -2441,8 +2441,8 @@ textarea:focus {
   height: 100%;
   max-height: none;
   margin: 0;
-  object-fit: cover;
-  object-position: center center;
+  object-fit: contain;
+  object-position: right center;
 }
 
 .preview-images .hero-image.portrait {
@@ -2744,11 +2744,9 @@ textarea:focus {
 }
 
 .free-rich-surface p,
-.free-rich-surface li,
 .free-rich-surface div,
 .free-rich-surface span,
 .free-rich-content p,
-.free-rich-content li,
 .free-rich-content div,
 .free-rich-content span {
   font-size: 1rem;
@@ -2771,7 +2769,6 @@ textarea:focus {
 }
 
 .free-rich-content p,
-.free-rich-content li,
 .free-rich-content div {
   color: inherit;
 }
@@ -2794,19 +2791,6 @@ textarea:focus {
 .free-rich-surface blockquote,
 .free-rich-surface figure {
   margin: 0 0 1em;
-}
-
-.free-rich-surface ul,
-.free-rich-surface ol,
-.free-rich-content ul,
-.free-rich-content ol {
-  margin: 0;
-  padding-left: 1.45em;
-}
-
-.free-rich-surface li,
-.free-rich-content li {
-  margin: 0.2em 0;
 }
 
 .free-rich-surface blockquote,
@@ -3832,7 +3816,8 @@ textarea:focus {
     left: 44%;
     width: 56%;
     max-width: none;
-    object-fit: cover;
+    object-fit: contain;
+    object-position: right center;
   }
 
   .preview-images .hero-image.portrait {
