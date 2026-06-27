@@ -2724,6 +2724,8 @@ textarea:focus {
   border-radius: 12px;
   background: #ffffff;
   color: #111827;
+  font-family: inherit;
+  font-size: 1rem;
   padding: 22px 24px;
   direction: ltr;
   line-height: 1.85;
@@ -2731,6 +2733,24 @@ textarea:focus {
   unicode-bidi: plaintext;
   white-space: normal;
   word-break: break-word;
+}
+
+.free-rich-surface *,
+.free-rich-content * {
+  font-family: inherit;
+  letter-spacing: 0;
+}
+
+.free-rich-surface p,
+.free-rich-surface li,
+.free-rich-surface div,
+.free-rich-surface span,
+.free-rich-content p,
+.free-rich-content li,
+.free-rich-content div,
+.free-rich-content span {
+  font-size: 1rem;
+  line-height: 1.85;
 }
 
 .free-rich-surface:focus {

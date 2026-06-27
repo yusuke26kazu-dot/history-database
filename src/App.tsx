@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode, type TouchEvent, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -29,7 +29,7 @@ import { buildTimelineItems, getHistoricalYear } from "./query";
 type ViewMode = "timeline" | "map" | "category" | "people" | "terms" | "cards";
 type TimelineLaneMode = "country" | "plain";
 type CardGroupMode = "all" | "category" | "country";
-type TermPopup = { term: string; definition: string; target?: EditableRecord };
+type TermPopup = { term: string; definition: string; label?: string; target?: EditableRecord };
 let pdfJsModulePromise: Promise<any> | null = null;
 type PersistedUiState = {
   viewMode?: ViewMode;
@@ -48,6 +48,12 @@ type KnowledgeCard = {
   groupCategory?: string;
   countryIds?: string[];
   tags?: string[];
+};
+type LinkTarget = {
+  record: EditableRecord;
+  title: string;
+  label: string;
+  summary: string;
 };
 type EventMapPin = {
   item: TimelineItem;
@@ -849,6 +855,17 @@ function renderRichText(text: string) {
   });
 }
 
+function renderLinkedRichText(text: string, renderText?: (text: string) => ReactNode) {
+  if (!renderText) return renderRichText(text);
+  const pattern = /(\*\*[^*]+\*\*)/g;
+  return text.split(pattern).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={`${part}-${index}`}>{renderText(part.slice(2, -2))}</strong>;
+    }
+    return <span key={`${part}-${index}`}>{renderText(part)}</span>;
+  });
+}
+
 function stripHtml(value: string) {
   return value.replace(/<[^>]*>/g, " ");
 }
@@ -900,14 +917,83 @@ function sanitizeRichHtml(value: string) {
         element.removeAttribute("style");
       }
     }
-    if ((element.tagName === "IMG" || element.tagName === "IFRAME") && !isSafeMediaUrl(element.getAttribute("src") ?? "")) {
+    if (element.tagName === "IMG" && !isSafeMediaUrl(element.getAttribute("src") ?? "", "image")) {
+      element.remove();
+    }
+    if (element.tagName === "IFRAME" && !isSafeMediaUrl(element.getAttribute("src") ?? "", "iframe")) {
       element.remove();
     }
   });
   return template.innerHTML;
 }
 
-function isSafeMediaUrl(value: string) {
+function getSanitizedColorStyle(element: Element): CSSProperties | undefined {
+  const color = element.getAttribute("style")?.match(/color:\s*([^;]+)/i)?.[1]?.trim();
+  return color && /^#[0-9a-f]{3,8}$/i.test(color) ? { color } : undefined;
+}
+
+function renderLinkedHtmlNode(node: ChildNode, key: string, renderText: (text: string) => ReactNode): ReactNode {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return <span key={key}>{renderText(node.textContent ?? "")}</span>;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+  const element = node as Element;
+  const children = Array.from(element.childNodes).map((child, index) => renderLinkedHtmlNode(child, `${key}-${index}`, renderText));
+  const style = getSanitizedColorStyle(element);
+
+  switch (element.tagName) {
+    case "B":
+    case "STRONG":
+      return <strong key={key} style={style}>{children}</strong>;
+    case "BLOCKQUOTE":
+      return <blockquote key={key} style={style}>{children}</blockquote>;
+    case "BR":
+      return <br key={key} />;
+    case "DIV":
+      return <div key={key} style={style}>{children}</div>;
+    case "EM":
+    case "I":
+      return <em key={key} style={style}>{children}</em>;
+    case "FIGCAPTION":
+      return <figcaption key={key} style={style}>{children}</figcaption>;
+    case "FIGURE":
+      return <figure key={key}>{children}</figure>;
+    case "H2":
+      return <h2 key={key} style={style}>{children}</h2>;
+    case "H3":
+      return <h3 key={key} style={style}>{children}</h3>;
+    case "IFRAME":
+      return <iframe key={key} title={element.getAttribute("title") ?? "埋め込み動画"} src={element.getAttribute("src") ?? ""} allowFullScreen />;
+    case "IMG":
+      return <img key={key} alt={element.getAttribute("alt") ?? "本文画像"} src={element.getAttribute("src") ?? ""} />;
+    case "LI":
+      return <li key={key} style={style}>{children}</li>;
+    case "OL":
+      return <ol key={key} style={style}>{children}</ol>;
+    case "P":
+      return <p key={key} style={style}>{children}</p>;
+    case "SPAN":
+    case "FONT":
+      return <span key={key} style={style}>{children}</span>;
+    case "U":
+      return <u key={key} style={style}>{children}</u>;
+    case "UL":
+      return <ul key={key} style={style}>{children}</ul>;
+    default:
+      return <span key={key}>{children}</span>;
+  }
+}
+
+function renderLinkedHtml(html: string, renderText: (text: string) => ReactNode) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return Array.from(template.content.childNodes).map((node, index) => renderLinkedHtmlNode(node, `${index}`, renderText));
+}
+
+function isSafeMediaUrl(value: string, mediaType: "image" | "iframe" = "iframe") {
+  if (mediaType === "image" && value.startsWith("data:image/")) return true;
+  if (mediaType === "image" && value.startsWith("/api/files/")) return true;
   try {
     const url = new URL(value);
     return ["http:", "https:"].includes(url.protocol);
@@ -1132,19 +1218,42 @@ function App() {
     });
   }, [personCategoryFilters, countryFilters, searchedItems, people, searchQuery, countries, regions]);
 
-  const termTargets = useMemo(() => {
-    const targets = new Map<string, EditableRecord>();
+  const linkTargets = useMemo(() => {
+    const targets = new Map<string, LinkTarget>();
+    const addTarget = (name: string, target: LinkTarget) => {
+      const key = name.trim();
+      if (!key || targets.has(key)) return;
+      targets.set(key, target);
+    };
     events.forEach((event) => {
-      targets.set(event.title, { type: "event", id: event.id });
-      (event.aliases ?? []).forEach((alias) => targets.set(alias, { type: "event", id: event.id }));
+      const target = {
+        record: { type: "event" as const, id: event.id },
+        title: event.title,
+        label: `出来事 / ${event.category}`,
+        summary: event.summary,
+      };
+      addTarget(event.title, target);
+      (event.aliases ?? []).forEach((alias) => addTarget(alias, target));
     });
     people.forEach((person) => {
-      targets.set(person.name, { type: "person", id: person.id });
-      (person.aliases ?? []).forEach((alias) => targets.set(alias, { type: "person", id: person.id }));
+      const target = {
+        record: { type: "person" as const, id: person.id },
+        title: person.name,
+        label: "人物",
+        summary: person.summary,
+      };
+      addTarget(person.name, target);
+      (person.aliases ?? []).forEach((alias) => addTarget(alias, target));
     });
     termCards.forEach((term) => {
-      targets.set(term.term, { type: "term", id: term.id });
-      term.aliases.forEach((alias) => targets.set(alias, { type: "term", id: term.id }));
+      const target = {
+        record: { type: "term" as const, id: term.id },
+        title: term.term,
+        label: `単語 / ${term.category}`,
+        summary: term.summary,
+      };
+      addTarget(term.term, target);
+      term.aliases.forEach((alias) => addTarget(alias, target));
     });
     return targets;
   }, [events, people, termCards]);
@@ -1624,11 +1733,12 @@ function App() {
   }
 
   function openTerm(term: string) {
-    const termCard = termCards.find((candidate) => candidate.term === term || candidate.aliases.includes(term));
+    const target = linkTargets.get(term);
     setTermPopup({
       term,
-      definition: termCard?.summary ?? glossary[term] ?? "この用語の解説はまだ未登録です。詳細カードや用語辞書に追記できます。",
-      target: termCard ? { type: "term", id: termCard.id } : termTargets.get(term),
+      label: target?.label,
+      definition: target?.summary ?? glossary[term] ?? "この用語の解説はまだ未登録です。詳細カードや用語辞書に追記できます。",
+      target: target?.record,
     });
   }
 
@@ -1726,9 +1836,10 @@ function App() {
   }
 
   function renderLinkedText(text: string, terms: string[]) {
-    const candidates = Array.from(new Set([...terms, ...Object.keys(glossary), ...termTargets.keys()])).sort(
-      (a, b) => b.length - a.length,
-    );
+    const candidates = Array.from(new Set([...terms, ...Object.keys(glossary), ...linkTargets.keys()]))
+      .map((term) => term.trim())
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
     if (candidates.length === 0) return text;
 
     const pattern = new RegExp(`(${candidates.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "g");
@@ -3407,7 +3518,8 @@ function DetailHeroImage({
         src={firstImage}
         onLoad={(event) => {
           const image = event.currentTarget;
-          const nextOrientation = image.naturalHeight > image.naturalWidth ? "portrait" : "landscape";
+          const imageRatio = image.naturalWidth / Math.max(image.naturalHeight, 1);
+          const nextOrientation = imageRatio < 1.45 ? "portrait" : "landscape";
           setOrientation(nextOrientation);
           onOrientationChange(nextOrientation);
         }}
@@ -3416,30 +3528,38 @@ function DetailHeroImage({
   );
 }
 
-function RichContentView({ blocks }: { blocks?: ContentBlock[] }) {
+function RichContentView({ blocks, renderText }: { blocks?: ContentBlock[]; renderText?: (text: string) => ReactNode }) {
   if (!blocks?.length) return null;
   const htmlBlock = blocks.find((block) => block.type === "html");
   if (htmlBlock) {
-    return <div className="rich-content free-rich-content" dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(htmlBlock.text) }} />;
+    const safeHtml = sanitizeRichHtml(htmlBlock.text);
+    if (!renderText) {
+      return <div className="rich-content free-rich-content" dangerouslySetInnerHTML={{ __html: safeHtml }} />;
+    }
+    return (
+      <div className="rich-content free-rich-content">
+        {renderLinkedHtml(safeHtml, renderText)}
+      </div>
+    );
   }
 
   return (
     <div className="rich-content">
       {blocks.map((block) => {
         if (block.type === "heading") {
-          return <h2 key={block.id}>{renderRichText(block.text)}</h2>;
+          return <h2 key={block.id}>{renderLinkedRichText(block.text, renderText)}</h2>;
         }
         if (block.type === "subheading") {
-          return <h3 key={block.id}>{renderRichText(block.text)}</h3>;
+          return <h3 key={block.id}>{renderLinkedRichText(block.text, renderText)}</h3>;
         }
         if (block.type === "quote") {
-          return <blockquote key={block.id}>{renderRichText(block.text)}</blockquote>;
+          return <blockquote key={block.id}>{renderLinkedRichText(block.text, renderText)}</blockquote>;
         }
         if (block.type === "image") {
           return (
             <figure key={block.id}>
               <img alt={block.caption || "本文画像"} src={block.text} />
-              {block.caption && <figcaption>{renderRichText(block.caption)}</figcaption>}
+              {block.caption && <figcaption>{renderLinkedRichText(block.caption, renderText)}</figcaption>}
             </figure>
           );
         }
@@ -3447,11 +3567,11 @@ function RichContentView({ blocks }: { blocks?: ContentBlock[] }) {
           return (
             <figure key={block.id}>
               <iframe title={block.caption || block.text} src={toEmbedUrl(block.text)} allowFullScreen />
-              {block.caption && <figcaption>{renderRichText(block.caption)}</figcaption>}
+              {block.caption && <figcaption>{renderLinkedRichText(block.caption, renderText)}</figcaption>}
             </figure>
           );
         }
-        return <p key={block.id}>{renderRichText(block.text)}</p>;
+        return <p key={block.id}>{renderLinkedRichText(block.text, renderText)}</p>;
       })}
     </div>
   );
@@ -3503,6 +3623,56 @@ function RichContentEditor({
     saveEditorHtml();
   }
 
+  function placeCaretInside(element: HTMLElement) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  function insertParagraphAfterList(list: HTMLElement, item: HTMLElement) {
+    const paragraph = document.createElement("p");
+    paragraph.appendChild(document.createElement("br"));
+    if (list.children.length <= 1) {
+      list.replaceWith(paragraph);
+    } else {
+      item.remove();
+      list.after(paragraph);
+    }
+    placeCaretInside(paragraph);
+    saveEditorHtml();
+  }
+
+  function getActiveListItem() {
+    const selection = window.getSelection();
+    const node = selection?.anchorNode;
+    const element = node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement;
+    const listItem = element?.closest("li");
+    if (!listItem || !editorRef.current?.contains(listItem)) return null;
+    return listItem as HTMLElement;
+  }
+
+  function formatPlainTextForPaste(text: string) {
+    return text
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean)
+      .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+      .join("");
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Backspace") return;
+    const listItem = getActiveListItem();
+    if (!listItem || listItem.textContent?.trim()) return;
+    const list = listItem.parentElement;
+    if (!list || !["UL", "OL"].includes(list.tagName)) return;
+    event.preventDefault();
+    insertParagraphAfterList(list, listItem);
+  }
+
   function insertImage() {
     document.getElementById("rich-image-upload")?.click();
   }
@@ -3515,12 +3685,18 @@ function RichContentEditor({
 
   function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
     const imageFile = Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/"));
-    if (!imageFile) return;
     event.preventDefault();
-    uploadFileAsset(imageFile).then((result) => {
-      if (!result) return;
-      insertHtml(`<figure><img src="${result}" alt="貼り付け画像"><figcaption></figcaption></figure><p><br></p>`);
-    });
+    if (imageFile) {
+      uploadFileAsset(imageFile).then((result) => {
+        if (!result) return;
+        insertHtml(`<figure><img src="${result}" alt="貼り付け画像"><figcaption></figcaption></figure><p><br></p>`);
+      });
+      return;
+    }
+    const html = event.clipboardData.getData("text/html");
+    const plainText = event.clipboardData.getData("text/plain");
+    const nextHtml = html ? sanitizeRichHtml(html) : formatPlainTextForPaste(plainText);
+    if (nextHtml) insertHtml(nextHtml);
   }
 
   function handleImageUpload(files: FileList | null) {
@@ -3564,6 +3740,7 @@ function RichContentEditor({
         contentEditable
         onBlur={() => saveEditorHtml()}
         onInput={() => saveEditorHtml()}
+        onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         ref={(element) => {
           editorRef.current = element;
@@ -3796,7 +3973,7 @@ function DetailPanel({
                 <h3>概要</h3>
                 <p>{renderLinkedText(event.summary, event.terms)}</p>
                 <h3>本文</h3>
-                <RichContentView blocks={event.contentBlocks} />
+                <RichContentView blocks={event.contentBlocks} renderText={(text) => renderLinkedText(text, event.terms)} />
               </section>
             )}
             {eventPreviewTab === "learning" && (
@@ -3987,7 +4164,12 @@ function DetailPanel({
                 <h3>概要</h3>
                 <p>{renderLinkedText(person.summary, [...getPersonCategories(person), ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])}</p>
                 <h3>本文</h3>
-                <RichContentView blocks={person.contentBlocks} />
+                <RichContentView
+                  blocks={person.contentBlocks}
+                  renderText={(text) =>
+                    renderLinkedText(text, [...getPersonCategories(person), ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])
+                  }
+                />
               </section>
             )}
             {personPreviewTab === "learning" && (
@@ -3997,7 +4179,16 @@ function DetailPanel({
             )}
             {personPreviewTab === "episodes" && (
               <section className="person-detail-section">
-                {(person.episodeBlocks ?? []).length > 0 ? <RichContentView blocks={person.episodeBlocks} /> : <p>エピソードはまだ登録されていません。</p>}
+                {(person.episodeBlocks ?? []).length > 0 ? (
+                  <RichContentView
+                    blocks={person.episodeBlocks}
+                    renderText={(text) =>
+                      renderLinkedText(text, [...getPersonCategories(person), ...getRecordCountryIds(person).map((id) => getCountryName(countries, id))])
+                    }
+                  />
+                ) : (
+                  <p>エピソードはまだ登録されていません。</p>
+                )}
               </section>
             )}
             {personPreviewTab === "works" && (
@@ -4188,7 +4379,7 @@ function DetailPanel({
                 <h3>概要</h3>
                 <p>{renderLinkedText(term.summary, term.relatedTerms)}</p>
                 <h3>本文</h3>
-                <RichContentView blocks={term.contentBlocks} />
+                <RichContentView blocks={term.contentBlocks} renderText={(text) => renderLinkedText(text, term.relatedTerms)} />
               </section>
             )}
             {termPreviewTab === "learning" && (
@@ -4273,6 +4464,7 @@ function DetailPanel({
       {termPopup && (
         <div className="term-popover">
           <strong>{termPopup.term}</strong>
+          {termPopup.label && <span className="knowledge-label">{termPopup.label}</span>}
           <p>{termPopup.definition}</p>
           {termPopup.target && (
             <button type="button" onClick={() => onOpenRecord(termPopup.target!)}>
