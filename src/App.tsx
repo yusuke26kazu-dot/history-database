@@ -93,6 +93,7 @@ type EventPlacement = {
 const baseCategories: Category[] = ["国", "戦争", "イベント", "発明・発見", "文化"];
 const baseTermCategories = ["用語", "概念", "地域", "史料"];
 const timelineCategoryOrder = baseCategories;
+const timelineLaneOrder = ["国", "戦争・イベント", "発明・発見", "文化"];
 const eventCategoryColors: Record<string, { background: string; mark: string; text: string }> = {
   国: { background: "#fff4cf", mark: "#e8c765", text: "#241a00" },
   戦争: { background: "#ffcdd2", mark: "#e53935", text: "#241a00" },
@@ -518,13 +519,19 @@ function groupRecords<T extends { id: string }>(records: T[], getLabels: (record
 
 function sortEventCategories(categories: string[]) {
   return [...categories].sort((a, b) => {
-    const aIndex = timelineCategoryOrder.indexOf(a);
-    const bIndex = timelineCategoryOrder.indexOf(b);
+    const order = categories.some((category) => category === "戦争・イベント") ? timelineLaneOrder : timelineCategoryOrder;
+    const aIndex = order.indexOf(a);
+    const bIndex = order.indexOf(b);
     if (aIndex !== -1 || bIndex !== -1) {
       return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex);
     }
     return a.localeCompare(b, "ja");
   });
+}
+
+function getTimelineLaneLabel(category: string | undefined) {
+  const normalized = normalizeEventCategory(category);
+  return normalized === "戦争" || normalized === "イベント" ? "戦争・イベント" : normalized;
 }
 
 function normalizeEventCategory(category: string | undefined): Category {
@@ -2197,7 +2204,7 @@ function TimelineView({
   );
   const countryLanes =
     laneMode === "plain"
-        ? sortEventCategories(Array.from(new Set(items.map((item) => item.category || "未分類"))))
+        ? sortEventCategories(Array.from(new Set(items.map((item) => getTimelineLaneLabel(item.category)))))
         : countriesFilter.length > 0
           ? countriesFilter
           : Array.from(new Set(items.flatMap((item) => (getRecordCountryIds(item).length ? getRecordCountryIds(item) : ["unclassified"])))).slice(0, 20);
@@ -2218,7 +2225,7 @@ function TimelineView({
     const placements = items.flatMap((item) => {
       const targetCountries =
         laneMode === "plain"
-          ? [item.category || "未分類"]
+          ? [getTimelineLaneLabel(item.category)]
           : countriesFilter.length > 0
             ? countriesFilter
             : getRecordCountryIds(item).length
