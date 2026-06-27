@@ -2285,15 +2285,19 @@ function TimelineView({
 
   const laneRowHeights: number[] = [];
   const laneTops: number[] = [];
+  const laneTopPadding = 14;
+  const laneCardStep = 34;
+  const laneBottomPadding = 18;
+  const laneGap = 4;
   let currentTop = eraHeight;
   for (let i = 0; i < countryLanes.length; i++) {
     laneTops.push(currentTop);
     const stack = maxStackByLane.get(i) ?? -1;
     const laneHeight = stack === -1 
       ? 0 
-      : Math.max(80, Math.round((70 + stack * 34) * heightZoom));
+      : Math.max(64, laneTopPadding + (stack + 1) * laneCardStep + laneBottomPadding);
     laneRowHeights.push(laneHeight);
-    currentTop += laneHeight;
+    currentTop += laneHeight + (laneHeight > 0 && i < countryLanes.length - 1 ? laneGap : 0);
   }
   const totalCountryLanesHeight = currentTop - eraHeight;
 
@@ -2484,7 +2488,6 @@ function TimelineView({
             if (laneHeight === 0) return null;
             return (
               <div className="country-lane" key={lane} style={{ "--lane-top": `${laneTops[index]}px`, "--lane-height": `${laneHeight}px` } as CSSProperties}>
-                {laneMode !== "plain" && <span className="lane-label-text">{lane}</span>}
               </div>
             );
           })}
@@ -2502,7 +2505,7 @@ function TimelineView({
                   {
                     "--left": `${placement.left}%`,
                     "--width": `${placement.width}%`,
-                    "--top": `${rowTop(placement.lane) + laneRowHeights[placement.lane] / 2 - 20 + placement.stack * 34}px`,
+                    "--top": `${rowTop(placement.lane) + laneTopPadding + placement.stack * laneCardStep}px`,
                     "--event-color": categoryColor.background,
                     "--event-mark": categoryColor.mark,
                     "--event-text": categoryColor.text,
