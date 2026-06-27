@@ -1003,6 +1003,14 @@ function renderLinkedHtml(html: string, renderText: (text: string) => ReactNode)
   return Array.from(template.content.childNodes).map((node, index) => renderLinkedHtmlNode(node, `${index}`, renderText));
 }
 
+function parseMarkdownImage(value: string) {
+  const match = value.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+  if (!match) return null;
+  const src = match[2].trim();
+  if (!isSafeMediaUrl(src, "image")) return null;
+  return { alt: match[1].trim() || "本文画像", src };
+}
+
 function isSafeMediaUrl(value: string, mediaType: "image" | "iframe" = "iframe") {
   if (mediaType === "image" && value.startsWith("data:image/")) return true;
   if (mediaType === "image" && value.startsWith("/api/files/")) return true;
@@ -3557,18 +3565,20 @@ function DetailHeroImage({
   return (
     <>
       <img className="hero-blur" alt="" src={firstImage} />
-      <img
-        className={`hero-image ${orientation}`}
-        alt={title}
-        src={firstImage}
-        onLoad={(event) => {
-          const image = event.currentTarget;
-          const imageRatio = image.naturalWidth / Math.max(image.naturalHeight, 1);
-          const nextOrientation = imageRatio < 1.45 ? "portrait" : "landscape";
-          setOrientation(nextOrientation);
-          onOrientationChange(nextOrientation);
-        }}
-      />
+      <div className={`hero-image-frame ${orientation}`}>
+        <img
+          className="hero-image"
+          alt={title}
+          src={firstImage}
+          onLoad={(event) => {
+            const image = event.currentTarget;
+            const imageRatio = image.naturalWidth / Math.max(image.naturalHeight, 1);
+            const nextOrientation = imageRatio < 1.45 ? "portrait" : "landscape";
+            setOrientation(nextOrientation);
+            onOrientationChange(nextOrientation);
+          }}
+        />
+      </div>
     </>
   );
 }
@@ -3591,6 +3601,9 @@ function RichContentView({ blocks, renderText }: { blocks?: ContentBlock[]; rend
   return (
     <div className="rich-content">
       {blocks.map((block) => {
+        if (block.type === "paragraph") {
+          return renderPlainContentText(block.text, renderText, block.id);
+        }
         if (block.type === "heading") {
           return <h2 key={block.id}>{renderLinkedRichText(block.text, renderText)}</h2>;
         }
@@ -3622,6 +3635,54 @@ function RichContentView({ blocks, renderText }: { blocks?: ContentBlock[]; rend
   );
 }
 
+function renderPlainContentText(text: string, renderText: ((text: string) => ReactNode) | undefined, keyPrefix: string) {
+  const renderLine = (value: string) => renderLinkedRichText(value, renderText);
+  const lines = text.split(/\r?\n/);
+  const nodes: ReactNode[] = [];
+  let paragraphLines: string[] = [];
+
+  function flushParagraph() {
+    if (paragraphLines.length === 0) return;
+    const paragraph = paragraphLines.join("\n").trimEnd();
+    if (paragraph.trim()) {
+      nodes.push(<p key={`${keyPrefix}-p-${nodes.length}`}>{renderLine(paragraph)}</p>);
+    }
+    paragraphLines = [];
+  }
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    const image = parseMarkdownImage(trimmed);
+    if (!trimmed) {
+      flushParagraph();
+      return;
+    }
+    if (image) {
+      flushParagraph();
+      nodes.push(
+        <figure key={`${keyPrefix}-img-${nodes.length}`}>
+          <img alt={image.alt} src={image.src} />
+          {image.alt !== "本文画像" && <figcaption>{renderLine(image.alt)}</figcaption>}
+        </figure>,
+      );
+      return;
+    }
+    if (trimmed.startsWith("## ")) {
+      flushParagraph();
+      nodes.push(<h2 key={`${keyPrefix}-h-${nodes.length}`}>{renderLine(trimmed.slice(3).trim())}</h2>);
+      return;
+    }
+    if (trimmed.startsWith("> ")) {
+      flushParagraph();
+      nodes.push(<blockquote key={`${keyPrefix}-q-${nodes.length}`}>{renderLine(trimmed.slice(2).trim())}</blockquote>);
+      return;
+    }
+    paragraphLines.push(line);
+  });
+  flushParagraph();
+  return nodes;
+}
+
 function RichContentEditor({
   blocks,
   editorKey,
@@ -3632,24 +3693,109 @@ function RichContentEditor({
   onChange: (blocks: ContentBlock[]) => void;
 }) {
   const [text, setText] = useState(() => blocksToPlainText(blocks));
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setText(blocksToPlainText(blocks));
   }, [editorKey]);
 
+  function updateText(nextText: string) {
+    setText(nextText);
+    onChange(plainTextToBlocks(nextText));
+  }
+
+  function replaceSelection(createReplacement: (selectedText: string) => { text: string; cursorStart: number; cursorEnd: number }) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = text.slice(start, end);
+    const replacement = createReplacement(selectedText);
+    const nextText = `${text.slice(0, start)}${replacement.text}${text.slice(end)}`;
+    updateText(nextText);
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + replacement.cursorStart, start + replacement.cursorEnd);
+    });
+  }
+
+  function wrapBold() {
+    replaceSelection((selectedText) => {
+      const content = selectedText || "太字";
+      return {
+        text: `**${content}**`,
+        cursorStart: selectedText ? 0 : 2,
+        cursorEnd: selectedText ? content.length + 4 : content.length + 2,
+      };
+    });
+  }
+
+  function prefixCurrentLines(prefix: string, fallbackText: string) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const lineStart = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+    const nextBreak = text.indexOf("\n", end);
+    const lineEnd = nextBreak === -1 ? text.length : nextBreak;
+    const selectedBlock = text.slice(lineStart, lineEnd) || fallbackText;
+    const lines = selectedBlock.split("\n");
+    const prefixed = lines.map((line) => (line.startsWith(prefix) ? line : `${prefix}${line || fallbackText}`)).join("\n");
+    const nextText = `${text.slice(0, lineStart)}${prefixed}${text.slice(lineEnd)}`;
+    updateText(nextText);
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(lineStart + prefix.length, lineStart + prefixed.length);
+    });
+  }
+
+  function insertImageMarkdown(src: string, alt: string) {
+    const markdown = `![${alt || "本文画像"}](${src})`;
+    replaceSelection(() => ({
+      text: `${text && !text.endsWith("\n") ? "\n\n" : ""}${markdown}\n\n`,
+      cursorStart: markdown.length + 2,
+      cursorEnd: markdown.length + 2,
+    }));
+  }
+
+  function handleImageUpload(files: FileList | null) {
+    const file = files?.[0];
+    if (!file?.type.startsWith("image/")) return;
+    uploadFileAsset(file).then((result) => {
+      if (!result) return;
+      insertImageMarkdown(result, file.name.replace(/\.[^.]+$/, "") || "本文画像");
+    });
+  }
+
   return (
-    <textarea
-      className="plain-content-editor"
-      key={editorKey}
-      value={text}
-      onChange={(event) => {
-        const nextText = event.target.value;
-        setText(nextText);
-        onChange(plainTextToBlocks(nextText));
-      }}
-      placeholder="本文を入力してください。既存カード名が含まれていれば、プレビューで自動的にリンクされます。"
-      aria-label="詳細ページ本文"
+    <div className="plain-content-editor-wrap">
+      <div className="plain-content-toolbar" aria-label="本文編集ツール">
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={wrapBold}>太字</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => prefixCurrentLines("## ", "見出し")}>見出し</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => prefixCurrentLines("> ", "引用")}>引用</button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => imageInputRef.current?.click()}>画像</button>
+        <input
+          hidden
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          onChange={(event) => {
+            handleImageUpload(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </div>
+      <textarea
+        className="plain-content-editor"
+        key={editorKey}
+        ref={textareaRef}
+        value={text}
+        onChange={(event) => updateText(event.target.value)}
+        placeholder="本文を入力してください。既存カード名が含まれていれば、プレビューで自動的にリンクされます。"
+        aria-label="詳細ページ本文"
       />
+    </div>
   );
 }
 

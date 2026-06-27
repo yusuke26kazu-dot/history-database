@@ -2428,30 +2428,31 @@ textarea:focus {
   transform: scale(1.12);
 }
 
-.preview-images .hero-image {
+.preview-images .hero-image-frame {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   left: 42%;
   z-index: 2;
-  display: block;
-  width: 58%;
-  max-width: none;
-  height: 100%;
-  max-height: none;
-  margin: 0;
-  object-fit: contain;
-  object-position: right center;
+  overflow: hidden;
 }
 
-.preview-images .hero-image.portrait {
-  left: auto;
+.preview-images .hero-image-frame.portrait {
+  left: 42%;
+}
+
+.preview-images .hero-image {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: block;
   width: auto;
-  max-width: 58%;
+  max-width: none;
   height: 100%;
-  object-fit: contain;
-  object-position: right center;
+  max-height: 100%;
+  margin: 0;
+  object-fit: fill;
 }
 
 .detail-location-map {
@@ -2855,6 +2856,36 @@ textarea:focus {
   font: inherit;
   font-size: 0.94rem;
   line-height: 1.75;
+}
+
+.plain-content-editor-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.plain-content-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 1px solid #d8e3e8;
+  border-radius: 10px;
+  background: #f7fbfc;
+  padding: 8px;
+}
+
+.plain-content-toolbar button {
+  border: 1px solid #d2dde3;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #22313a;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.plain-content-toolbar button:hover {
+  border-color: #46c6ae;
 }
 
 .plain-content-editor:focus {
@@ -3835,19 +3866,12 @@ textarea:focus {
     height: calc(100vw * 300 / 790) !important;
   }
 
-  .preview-images .hero-image {
+  .preview-images .hero-image-frame {
     left: 44%;
-    width: 56%;
-    max-width: none;
-    object-fit: contain;
-    object-position: right center;
   }
 
-  .preview-images .hero-image.portrait {
-    left: auto;
-    width: auto;
-    max-width: 54%;
-    object-fit: contain;
+  .preview-images .hero-image-frame.portrait {
+    left: 44%;
   }
 
   .detail-hero-copy h2 {
