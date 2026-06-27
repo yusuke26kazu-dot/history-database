@@ -2596,7 +2596,9 @@ textarea:focus {
 .rich-content h3,
 .rich-content p,
 .rich-content blockquote,
-.rich-content figure {
+.rich-content figure,
+.rich-content ul,
+.rich-content ol {
   margin: 0;
 }
 
@@ -2790,12 +2792,21 @@ textarea:focus {
 
 .free-rich-surface p,
 .free-rich-surface blockquote,
+.free-rich-surface figure {
+  margin: 0 0 1em;
+}
+
 .free-rich-surface ul,
 .free-rich-surface ol,
-.free-rich-surface figure,
 .free-rich-content ul,
 .free-rich-content ol {
-  margin: 0 0 1em;
+  margin: 0;
+  padding-left: 1.45em;
+}
+
+.free-rich-surface li,
+.free-rich-content li {
+  margin: 0.2em 0;
 }
 
 .free-rich-surface blockquote,

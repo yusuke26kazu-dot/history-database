@@ -924,6 +924,16 @@ function sanitizeRichHtml(value: string) {
       element.remove();
     }
   });
+  Array.from(template.content.querySelectorAll("li")).forEach((element) => {
+    if (!element.textContent?.trim() && !element.querySelector("img, iframe")) {
+      element.remove();
+    }
+  });
+  Array.from(template.content.querySelectorAll("ul, ol")).forEach((element) => {
+    if (!element.textContent?.trim() && !element.querySelector("img, iframe")) {
+      element.remove();
+    }
+  });
   return template.innerHTML;
 }
 
