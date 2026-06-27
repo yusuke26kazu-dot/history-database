@@ -93,7 +93,7 @@ type EventPlacement = {
 const baseCategories: Category[] = ["国", "戦争", "イベント", "発明・発見", "文化"];
 const baseTermCategories = ["用語", "概念", "地域", "史料"];
 const timelineCategoryOrder = baseCategories;
-const timelineLaneOrder = ["国", "戦争・イベント", "発明・発見", "文化"];
+const timelineLaneOrder = ["国", "戦争・イベント", "発明・発見・文化"];
 const eventCategoryColors: Record<string, { background: string; mark: string; text: string }> = {
   国: { background: "#fff4cf", mark: "#e8c765", text: "#241a00" },
   戦争: { background: "#ffcdd2", mark: "#e53935", text: "#241a00" },
@@ -531,7 +531,9 @@ function sortEventCategories(categories: string[]) {
 
 function getTimelineLaneLabel(category: string | undefined) {
   const normalized = normalizeEventCategory(category);
-  return normalized === "戦争" || normalized === "イベント" ? "戦争・イベント" : normalized;
+  if (normalized === "戦争" || normalized === "イベント") return "戦争・イベント";
+  if (normalized === "発明・発見" || normalized === "文化") return "発明・発見・文化";
+  return normalized;
 }
 
 function normalizeEventCategory(category: string | undefined): Category {
