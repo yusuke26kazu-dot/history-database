@@ -41,6 +41,7 @@ type KnowledgeCard = {
   type: EditableRecord["type"];
   title: string;
   aliases?: string[];
+  imageUrls?: string[];
   label: string;
   summary: string;
   meta: string;
@@ -1197,6 +1198,10 @@ function App() {
       ]),
     [customGenres, events],
   );
+  const termGenres = useMemo(
+    () => uniqueValues(termCards.flatMap((term) => term.genres ?? [])),
+    [termCards],
+  );
   const filteredItems = useMemo(
     () =>
       timelineItems.filter((item) => {
@@ -1314,6 +1319,7 @@ function App() {
       type: "event" as const,
       title: event.title,
       aliases: event.aliases ?? [],
+      imageUrls: event.imageUrls ?? [],
       label: `出来事 / ${event.category}`,
       summary: event.summary,
       meta: `${toLabelDate(event.startDate)}${event.endDate ? ` - ${toLabelDate(event.endDate)}` : ""}`,
@@ -1341,6 +1347,7 @@ function App() {
       type: "person" as const,
       title: person.name,
       aliases: person.aliases ?? [],
+      imageUrls: person.imageUrls ?? [],
       label: "人物",
       summary: person.summary,
       meta: toPersonLifeLabel(person),
@@ -1365,6 +1372,7 @@ function App() {
       type: "term" as const,
       title: term.term,
       aliases: term.aliases,
+      imageUrls: term.imageUrls ?? [],
       label: `単語 / ${term.category}`,
       summary: term.summary,
       meta: term.aliases.length ? `別名: ${term.aliases.join("、")}` : "単語カード",
@@ -2138,6 +2146,8 @@ function App() {
             termCategories={termCategories}
             personCategories={personCategories}
             genres={genres}
+            eventGenres={eventGenres}
+            termGenres={termGenres}
             countries={countries}
             regions={regions}
             onUpdateEvent={updateEvent}
@@ -2943,7 +2953,15 @@ function AllCardsView({
                 type="button"
               >
                 <div className="person-thumb">
-                  {card.type === "event" ? <CalendarDays size={22} /> : card.type === "person" ? <UserRound size={22} /> : <BookOpen size={22} />}
+                  {card.imageUrls?.[0] ? (
+                    <img src={card.imageUrls[0]} alt={card.title} />
+                  ) : card.type === "event" ? (
+                    <CalendarDays size={22} />
+                  ) : card.type === "person" ? (
+                    <UserRound size={22} />
+                  ) : (
+                    <BookOpen size={22} />
+                  )}
                 </div>
                 <span className="record-card-label">{card.label}</span>
                 <span>{card.title}</span>
@@ -3817,7 +3835,15 @@ function RelatedCardsSection({
           type="button"
         >
           <div className="person-thumb">
-            {card.type === "event" ? <CalendarDays size={22} /> : card.type === "person" ? <UserRound size={22} /> : <BookOpen size={22} />}
+            {card.imageUrls?.[0] ? (
+              <img src={card.imageUrls[0]} alt={card.title} />
+            ) : card.type === "event" ? (
+              <CalendarDays size={22} />
+            ) : card.type === "person" ? (
+              <UserRound size={22} />
+            ) : (
+              <BookOpen size={22} />
+            )}
           </div>
           <span className="record-card-label">{card.label}</span>
           <span>{card.title}</span>
@@ -3842,6 +3868,8 @@ function DetailPanel({
   termCategories,
   personCategories,
   genres,
+  eventGenres,
+  termGenres,
   countries,
   regions,
   onUpdateEvent,
@@ -3868,6 +3896,8 @@ function DetailPanel({
   termCategories: string[];
   personCategories: string[];
   genres: string[];
+  eventGenres: string[];
+  termGenres: string[];
   countries: Country[];
   regions: Region[];
   onUpdateEvent: (id: string, patch: Partial<Event>) => void;
@@ -4080,7 +4110,7 @@ function DetailPanel({
                 values={event.genres ?? []}
                 onChange={(values) => onUpdateEvent(event.id, { genres: values })}
                 onCreate={(value) => onUpdateEvent(event.id, { genres: uniqueValues([...(event.genres ?? []), value.trim()]) })}
-                options={genres.map((genre) => ({ value: genre, label: genre }))}
+                options={eventGenres.map((genre) => ({ value: genre, label: genre }))}
                 placeholder="小カテゴリを検索"
                 emptyLabel="未選択"
               />
@@ -4476,7 +4506,7 @@ function DetailPanel({
                 values={term.genres ?? []}
                 onChange={(values) => onUpdateTerm(term.id, { genres: values })}
                 onCreate={(value) => onUpdateTerm(term.id, { genres: uniqueValues([...(term.genres ?? []), value.trim()]) })}
-                options={genres.map((genre) => ({ value: genre, label: genre }))}
+                options={termGenres.map((genre) => ({ value: genre, label: genre }))}
                 placeholder="ジャンルを検索"
                 emptyLabel="未選択"
               />
